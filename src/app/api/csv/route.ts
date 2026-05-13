@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getExcelData } from '~/server/excel-store';
 import fs from 'fs';
 import path from 'path';
+import * as XLSX from 'xlsx';
 
 export async function GET() {
   try {
@@ -14,12 +15,28 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { content } = (await request.json()) as { content: string };
-    const filePath = path.join(process.cwd(), 'epicos_data.csv');
-    fs.writeFileSync(filePath, content, 'utf8');
-    return NextResponse.json({ success: true });
+    const { data } = (await request.json()) as { data: Record<string, any>[] };
+
+    if (!data || !Array.isArray(data)) {
+      return NextResponse.json({ error: 'Invalid data format' }, { status: 400 });
+    }
+
+    // Create a new workbook and worksheet
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Planejamento');
+
+    // Generate buffer
+    const buf = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    // Save to a new file
+    const fileName = `planejamento_exportado_${new Date().getTime()}.xlsx`;
+    const filePath = path.join(process.cwd(), fileName);
+    fs.writeFileSync(filePath, buf);
+
+    return NextResponse.json({ success: true, fileName });
   } catch (error) {
-    console.error('Error saving file:', error);
+    console.error('Error saving excel file:', error);
     return NextResponse.json({ error: 'Failed to save data' }, { status: 500 });
   }
 }

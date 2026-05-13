@@ -480,12 +480,10 @@ const App = () => {
       return `${d}/${m}/${y} 00:00:00`;
     };
 
-    let exportHeaders = csvHeaders;
     let exportData: Record<string, string | number | null | undefined>[] = [];
 
     // Fallback if the user tries exporting mock data without uploading a CSV first
     if (rawCsvData.length === 0) {
-      exportHeaders = ['ID', 'Title', 'Start Date', 'Target Date', 'State Change Date', 'Percent Complete'];
       exportData = activities.map(act => {
         return {
           'ID': act.id,
@@ -497,7 +495,7 @@ const App = () => {
         };
       });
     } else {
-      // Export original CSV structure with adjusted dates
+      // Export original structure with adjusted dates
       exportData = rawCsvData.map((row, index) => {
         const activityId = (row.ID as string | number) ?? index + 1;
         const activity = activities.find(a => a.id === activityId);
@@ -518,31 +516,23 @@ const App = () => {
       });
     }
 
-    const headerRow = exportHeaders.map(h => `"${h}"`).join(csvSeparator);
-    const bodyRows = exportData.map(row => {
-       return exportHeaders.map(h => {
-          const val = row[h] !== undefined && row[h] !== null ? String(row[h]) : '';
-          return `"${val.replace(/"/g, '""')}"`;
-       }).join(csvSeparator);
-    });
-
-    const csvContent = [headerRow, ...bodyRows].join('\n');
-
-    // Save to server filesystem
+    // Save to server filesystem as XLSX via API
     try {
       const response = await fetch('/api/csv', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: csvContent })
+        body: JSON.stringify({ data: exportData })
       });
 
       if (response.ok) {
+        const result = await response.json() as { success: boolean; fileName: string };
+        alert(`Arquivo salvo com sucesso: ${result.fileName}`);
         setIsDirty(false);
       } else {
         throw new Error('Falha ao salvar');
       }
     } catch (_error) {
-      alert('Erro ao salvar arquivo');
+      alert('Erro ao salvar arquivo XLSX');
     } finally {
       setIsSaving(false);
     }
@@ -728,6 +718,11 @@ const App = () => {
                        <div className="flex gap-2 pl-[24px]">
                          <span className="text-[9px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold border border-indigo-100">{activity.childrenCount} itens</span>
                          <span className="text-[9px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortTotal} pts</span>
+                       </div>
+                     )}
+                     {activity.isChild && (
+                       <div className="flex gap-2 pl-[24px]">
+                         <span className="text-[9px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortPoints} pts</span>
                        </div>
                      )}
                    </div>
