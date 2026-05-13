@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Calendar, Info, Target, Upload, Save, RefreshCw, AlertCircle } from 'lucide-react';
+import { Calendar, Info, Target, Upload, Save, RefreshCw, AlertCircle, ChevronRight, ChevronDown } from 'lucide-react';
 
 interface Activity {
   id: string | number;
@@ -13,6 +13,7 @@ interface Activity {
   percentComplete: number;
   isParent?: boolean;
   isChild?: boolean;
+  isCollapsed?: boolean;
   effortPoints?: number;
   parentId?: string | number;
   assignedTo?: string;
@@ -113,7 +114,6 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
   const activities: Activity[] = [];
   const assignees = new Set<string>();
   let currentParent: Activity | null = null;
-  let childrenEffortSum = 0;
 
   for (const row of validRows) {
     if (!row) continue;
@@ -124,15 +124,6 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
     const workItemTitle = (row['Work Item Title'] ?? row['Work Item Title '] ?? row.Title ?? 'Sem título') as string;
     const isParentItem = workItemType === 'Épico' || workItemType === 'Demanda';
     
-    if (isParentItem && currentParent !== null) {
-      const totalEffortDays = Math.max(1, Math.ceil(childrenEffortSum / 2));
-      currentParent.actualDuration = totalEffortDays;
-      currentParent.effortTotal = childrenEffortSum;
-      activities.push(currentParent);
-      currentParent = null;
-      childrenEffortSum = 0;
-    }
-
     const start = parseDate(row['Start Date'] as string);
     const target = parseDate(row['Target Date'] as string);
     const effort = parseInt(row.Effort as string) || 0;
@@ -148,8 +139,8 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
 
     if (isParentItem) {
       currentParent = {
-        id: (row.ID as string) ?? activities.length + 1,
-        name: `📁 ${workItemTitle}`,
+        id: (row.ID as string) ?? `p-${activities.length}`,
+        name: workItemTitle,
         planStart: planStartDay,
         planDuration: planEndDay ? Math.max(1, planEndDay - planStartDay) : 7,
         actualStart: actualStartDay,
@@ -160,18 +151,14 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
         childrenCount: 0,
         assignedTo: row['Assigned To'] as string
       };
+      activities.push(currentParent);
     } else {
       const planDurationDays = planEndDay ? Math.max(1, planEndDay - planStartDay) : 7;
       const actualDurationDays = Math.max(1, Math.ceil(effort / 2));
       
-      childrenEffortSum += effort;
-      if (currentParent) {
-        currentParent.childrenCount = (currentParent.childrenCount ?? 0) + 1;
-      }
-
-      activities.push({
-        id: (row.ID as string) ?? activities.length + 1,
-        name: `    ${workItemTitle}`,
+      const child: Activity = {
+        id: (row.ID as string) ?? `c-${activities.length}`,
+        name: workItemTitle,
         planStart: planStartDay,
         planDuration: planDurationDays,
         actualStart: actualStartDay,
@@ -181,17 +168,19 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
         effortPoints: effort,
         parentId: currentParent?.id,
         assignedTo: row['Assigned To'] as string
-      });
+      };
+      
+      activities.push(child);
+
+      if (currentParent) {
+        currentParent.childrenCount = (currentParent.childrenCount ?? 0) + 1;
+        currentParent.effortTotal = (currentParent.effortTotal ?? 0) + effort;
+        // Update parent actual duration based on children effort sum (if desired)
+        currentParent.actualDuration = Math.max(1, Math.ceil((currentParent.effortTotal ?? 0) / 2));
+      }
     }
   }
 
-  if (currentParent !== null) {
-    const totalEffortDays = Math.max(1, Math.ceil(childrenEffortSum / 2)) || 7;
-    currentParent.actualDuration = totalEffortDays;
-    currentParent.effortTotal = childrenEffortSum;
-    activities.push(currentParent);
-  }
-  
   return { mapped: activities, minTime, assignees: Array.from(assignees).sort() };
 };
 
@@ -203,6 +192,16 @@ const App = () => {
   const [baseDate, setBaseDate] = useState(new Date(2026, 0, 1));
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [collapsedParents, setCollapsedParents] = useState<Set<string | number>>(new Set());
+
+  const toggleCollapsed = (parentId: string | number) => {
+    setCollapsedParents(prev => {
+      const next = new Set(prev);
+      if (next.has(parentId)) next.delete(parentId);
+      else next.add(parentId);
+      return next;
+    });
+  };
 
   // Store original CSV data for export mapping
   const [rawCsvData, setRawCsvData] = useState<Record<string, string | number | null | undefined>[]>([]);
@@ -210,18 +209,34 @@ const App = () => {
   const [csvSeparator, setCsvSeparator] = useState(',');
 
   const filteredActivities = useMemo(() => {
-    if (!assignedToFilter) return activities;
+    let result = activities;
     
-    // Filter logic: if parent is selected, show parent and children, or if child matches assignee show it + parent
-    return activities.filter(act => {
-      if (act.assignedTo === assignedToFilter) return true;
-      if (act.isParent) {
-        // Show parent if any child matches
-        return activities.some(child => child.parentId === act.id && child.assignedTo === assignedToFilter);
-      }
-      return false;
-    });
-  }, [activities, assignedToFilter]);
+    if (assignedToFilter) {
+      const matchedIds = new Set<string | number>();
+      
+      // First pass: match by assignee and collect parent IDs
+      activities.forEach(act => {
+        if (act.assignedTo === assignedToFilter) {
+          matchedIds.add(act.id);
+          if (act.parentId) matchedIds.add(act.parentId);
+        }
+      });
+
+      // Second pass: if a parent is matched, match all its children to keep the tree view consistent
+      activities.forEach(act => {
+        if (act.isParent && matchedIds.has(act.id)) {
+          activities.filter(child => child.parentId === act.id).forEach(child => {
+            matchedIds.add(child.id);
+          });
+        }
+      });
+
+      result = activities.filter(act => matchedIds.has(act.id));
+    }
+
+    // Filter out children of collapsed parents
+    return result.filter(act => !act.parentId || !collapsedParents.has(act.parentId));
+  }, [activities, assignedToFilter, collapsedParents]);
 
   // Dynamically calculate period count based on the filtered activity list
   const periodCount = useMemo(() => {
@@ -407,6 +422,10 @@ const App = () => {
         setCsvHeaders(parsed.headers);
         setCsvSeparator(parsed.separator);
         setIsDirty(false);
+        
+        // Collapse all parents by default
+        const parentIds = mapped.filter(a => a.isParent).map(a => a.id);
+        setCollapsedParents(new Set(parentIds));
       } else {
         alert("No valid data found. Please ensure your CSV has 'Title' and 'Start Date' columns.");
       }
@@ -438,6 +457,10 @@ const App = () => {
             setBaseDate(new Date(minTime));
             setAssignees(assignees);
             setIsDirty(false);
+
+            // Collapse all parents by default
+            const parentIds = mapped.filter(a => a.isParent).map(a => a.id);
+            setCollapsedParents(new Set(parentIds));
           }
         }
       } catch (error) {
@@ -683,27 +706,42 @@ const App = () => {
                 const normalPeriods = activity.actualDuration - overagePeriods;
 
                 // Add child/effort labels
-                const label = activity.isParent ? (
-                   <div className="flex justify-between items-center w-full pr-4">
-                     <span className="font-extrabold text-slate-900">{activity.name}</span>
-                     <div className="flex gap-2">
-                       <span className="text-[9px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold border border-indigo-100">{activity.childrenCount} itens</span>
-                       <span className="text-[9px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortTotal} pts</span>
+                const isCollapsed = collapsedParents.has(activity.id);
+                const label = (
+                   <div className={`flex flex-col gap-1.5 w-full ${activity.isChild ? 'pl-8' : 'pl-2'}`}>
+                     <div className="flex items-center gap-2 pr-4">
+                       {activity.isParent ? (
+                         <button 
+                           onClick={() => toggleCollapsed(activity.id)}
+                           className="p-0.5 hover:bg-slate-200 rounded transition-colors"
+                         >
+                           {isCollapsed ? <ChevronRight size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
+                         </button>
+                       ) : (
+                         <div className="w-[18px]" /> // Spacer for child alignment
+                       )}
+                       <span className={`truncate ${activity.isParent ? 'font-extrabold text-slate-900' : 'text-slate-600 font-medium'}`} title={activity.name}>
+                          {activity.name}
+                       </span>
                      </div>
+                     {activity.isParent && (
+                       <div className="flex gap-2 pl-[24px]">
+                         <span className="text-[9px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold border border-indigo-100">{activity.childrenCount} itens</span>
+                         <span className="text-[9px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortTotal} pts</span>
+                       </div>
+                     )}
                    </div>
-                ) : <span className="text-slate-600 font-medium">{activity.name}</span>;
+                );
 
                 return (
                   <React.Fragment key={activity.id}>
-                    {/* PLAN ROW (TOP) */}
-                    <tr className={`group transition-colors ${activity.isParent ? 'bg-slate-50/80' : 'hover:bg-slate-50/30'}`}>
-                      <td className={`p-3 border-r border-slate-50 font-bold ${activity.isParent ? 'text-slate-900' : 'text-slate-600'}`} style={{ width: activityWidth, minWidth: activityWidth, maxWidth: activityWidth }}>
-                        <div className="line-clamp-1 truncate" title={activity.name}>
-                          {label}
-                        </div>
+                    {/* ACTIVITY ROW */}
+                    <tr className={`group transition-colors border-b border-slate-100 ${activity.isParent ? 'bg-slate-50/80' : 'hover:bg-slate-50/30'}`}>
+                      <td className={`p-4 border-r border-slate-50 font-bold ${activity.isParent ? 'text-slate-900' : 'text-slate-600'}`} style={{ width: activityWidth, minWidth: activityWidth, maxWidth: activityWidth }}>
+                        {label}
                       </td>
-                      <td className="p-3 text-center font-bold text-indigo-600 border-r border-slate-50">{getDateRangeStr(activity.planStart, activity.planDuration)}</td>
-                      <td className="p-0 relative bg-white">
+                      <td className="p-4 text-center font-bold text-indigo-600 border-r border-slate-50">{getDateRangeStr(activity.planStart, activity.planDuration)}</td>
+                      <td className="p-0 relative bg-white h-20">
                         {/* Background Grid Lines */}
                         <div className="flex h-full absolute inset-0 pointer-events-none">
                           {daysData.map(p => (
@@ -711,9 +749,9 @@ const App = () => {
                           ))}
                         </div>
                         
-                        {/* Interactive Plan Bar */}
+                        {/* Interactive Plan Bar (Top Half) */}
                         <div 
-                          className="absolute top-2 bottom-2 bg-indigo-100 border border-indigo-200 rounded-lg cursor-grab shadow-sm flex items-center justify-center px-2 z-10 select-none hover:bg-indigo-200 hover:border-indigo-300 transition-colors active:cursor-grabbing group/bar"
+                          className="absolute top-2 h-7 bg-indigo-100 border border-indigo-200 rounded-lg cursor-grab shadow-sm flex items-center justify-center px-2 z-10 select-none hover:bg-indigo-200 hover:border-indigo-300 transition-colors active:cursor-grabbing group/bar"
                           style={{
                             left: `${activity.planStart * DAY_WIDTH}px`,
                             width: `${activity.planDuration * DAY_WIDTH}px`
@@ -732,26 +770,10 @@ const App = () => {
                             onMouseDown={(e) => handleBarMouseDown(e, activity.id, 'plan', 'resize-end', activity.planStart, activity.planDuration)}
                           />
                         </div>
-                      </td>
-                    </tr>
 
-                    {/* ACTUAL ROW (BOTTOM) */}
-                    <tr className={`group transition-colors border-b border-slate-100 ${activity.isParent ? 'bg-slate-50/80' : 'hover:bg-slate-50/30'}`}>
-                      <td className="p-3 flex items-center gap-2 text-[9px] text-slate-400 uppercase tracking-widest font-black border-r border-slate-50" style={{ width: activityWidth, minWidth: activityWidth, maxWidth: activityWidth }}>
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> <span className="truncate">Execução Real</span>
-                      </td>
-                      <td className="p-3 text-center font-bold text-emerald-600 border-r border-slate-50">{getDateRangeStr(activity.actualStart, activity.actualDuration)}</td>
-                      <td className="p-0 relative h-12">
-                        {/* Background Grid Lines */}
-                        <div className="flex h-full absolute inset-0 pointer-events-none">
-                          {daysData.map(p => (
-                            <div key={p.num} style={{ minWidth: DAY_WIDTH, width: DAY_WIDTH }} className={`border-l border-slate-50 ${p.num === highlightPeriod ? 'bg-amber-400/10' : ''}`} />
-                          ))}
-                        </div>
-                        
-                        {/* Interactive Actual Bar */}
+                        {/* Interactive Actual Bar (Bottom Half) */}
                         <div 
-                          className="absolute top-2 bottom-2 rounded-lg cursor-grab shadow-md flex overflow-hidden z-10 select-none active:cursor-grabbing hover:shadow-lg transition-all group/actual"
+                          className="absolute bottom-2 h-7 rounded-lg cursor-grab shadow-md flex overflow-hidden z-10 select-none active:cursor-grabbing hover:shadow-lg transition-all group/actual"
                           style={{
                             left: `${activity.actualStart * DAY_WIDTH}px`,
                             width: `${activity.actualDuration * DAY_WIDTH}px`
