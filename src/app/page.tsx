@@ -172,28 +172,6 @@ const rowHasStartDate = (row: Record<string, string | number | null | undefined>
   return start != null && String(start).trim() !== '';
 };
 
-const spanFromActivatedAndStateChange = (
-  getDayDifference: (date: Date | null) => number,
-  activated: Date | null,
-  stateChange: Date | null,
-  fallbackStart = 0,
-) => {
-  const startDay = activated
-    ? getDayDifference(activated)
-    : stateChange
-      ? getDayDifference(stateChange)
-      : fallbackStart;
-  const endDay = stateChange
-    ? getDayDifference(stateChange)
-    : activated
-      ? getDayDifference(activated)
-      : startDay + 1;
-  return {
-    start: startDay,
-    duration: Math.max(1, endDay - startDay),
-  };
-};
-
 const processCSVData = (data: Record<string, string | number | null | undefined>[]) => {
   let minTime = Infinity;
   // Parents (Épico/Demanda) may have no Start Date in ADO exports; children still need them
@@ -258,21 +236,14 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
       const isDemanda = parentKind === 'Demanda';
 
       if (isDemanda) {
-        const hasActivatedOrState = !!(activated || stateChange);
-        const span = spanFromActivatedAndStateChange(
-          getDayDifference,
-          activated,
-          stateChange,
-          planStartDay,
-        );
         currentParent = {
           id: (row.ID as string) ?? `p-${activities.length}`,
           name: workItemTitle,
-          planStart: span.start,
-          planDuration: span.duration,
-          actualStart: span.start,
-          actualDuration: span.duration,
-          isActualPlaceholder: !hasActivatedOrState,
+          planStart: 0,
+          planDuration: 1,
+          actualStart: 0,
+          actualDuration: 1,
+          isActualPlaceholder: true,
           percentComplete: percentComplete,
           isParent: true,
           workItemType,
@@ -281,7 +252,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           childrenCount: 0,
           assignedTo: row['Assigned To'] as string,
         };
-        if (!hasActivatedOrState) demandasNeedingChildSpan.add(currentParent.id);
+        demandasNeedingChildSpan.add(currentParent.id);
       } else {
         currentParent = {
           id: (row.ID as string) ?? `p-${activities.length}`,
@@ -386,17 +357,17 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
     }
   }
 
-  // Demandas without row dates: plan = actual = children's Activated/State Change span
+  // Demandas: bars derived from children dates
   for (const parent of activities.filter((a) => a.isParent && demandasNeedingChildSpan.has(a.id))) {
     const children = activities.filter((c) => c.parentId === parent.id);
     if (children.length === 0) continue;
 
-    const start = Math.min(...children.map((c) => c.actualStart));
-    const end = Math.max(...children.map((c) => c.actualStart + c.actualDuration));
-    parent.planStart = start;
-    parent.planDuration = Math.max(1, end - start);
-    parent.actualStart = start;
-    parent.actualDuration = parent.planDuration;
+    const actualStarts = children.map((c) => c.actualStart);
+    const actualEnds = children.map((c) => c.actualStart + c.actualDuration);
+    parent.actualStart = Math.min(...actualStarts);
+    parent.actualDuration = Math.max(1, Math.max(...actualEnds) - parent.actualStart);
+    parent.planStart = parent.actualStart;
+    parent.planDuration = parent.actualDuration;
     parent.isActualPlaceholder = false;
   }
 
