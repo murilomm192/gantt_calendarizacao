@@ -617,7 +617,7 @@ const App = () => {
       setDragState(null);
     };
 
-    if (dragState) {
+    if (isResizingCol || dragState) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
       document.body.style.userSelect = 'none'; // Prevent text selection
@@ -976,12 +976,12 @@ const App = () => {
                 >
                   Atividade
                   <div 
-                    className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-400 bg-slate-100 transition-colors"
+                    className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-400 bg-slate-100 z-40 transition-colors"
                     onMouseDown={handleColMouseDown}
                   />
                 </th>
                 <th 
-                  className="sticky z-30 p-3 text-center font-bold uppercase tracking-wider text-slate-400 bg-white text-[10px]"
+                  className="sticky z-20 p-3 text-center font-bold uppercase tracking-wider text-slate-400 bg-white text-[10px]"
                   style={{ left: activityWidth, width: 128, minWidth: 128 }}
                 >
                   Cronograma
@@ -1052,10 +1052,10 @@ const App = () => {
                 if (row.type === 'section') {
                   return (
                     <tr key={`section-${row.kind}`} className="border-y bg-slate-100/90 text-slate-700 border-slate-200">
-                      <td className="sticky left-0 z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest" style={{ width: activityWidth, minWidth: activityWidth }}>
+                      <td className="sticky left-0 z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest pointer-events-none" style={{ width: activityWidth, minWidth: activityWidth }}>
                         {row.label}
                       </td>
-                      <td className="sticky z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest" style={{ left: activityWidth, width: 128, minWidth: 128 }}>
+                      <td className="sticky z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest pointer-events-none" style={{ left: activityWidth, width: 128, minWidth: 128 }}>
                         {row.label}
                       </td>
                       <td className="px-3 py-1.5" />
@@ -1080,7 +1080,7 @@ const App = () => {
                         {activity.isParent ? (
                           <button 
                             onClick={() => toggleCollapsed(activity.id)}
-                            className="p-0.5 hover:bg-slate-200 rounded transition-colors"
+                            className="p-0.5 hover:bg-slate-200 rounded transition-colors pointer-events-auto"
                           >
                             {isCollapsed ? <ChevronRight size={12} className="text-slate-500" /> : <ChevronDown size={12} className="text-slate-500" />}
                           </button>
@@ -1109,10 +1109,10 @@ const App = () => {
                   <React.Fragment key={activity.id}>
                     {/* ACTIVITY ROW */}
                     <tr className={`group transition-colors border-b border-slate-100 ${activity.isParent ? 'bg-slate-50/80' : 'hover:bg-slate-50/30'}`}>
-                      <td className={`sticky left-0 z-[15] bg-white p-3 border-r border-slate-50 font-bold text-[11px] ${activity.isParent ? 'text-slate-900' : 'text-slate-600'}`} style={{ width: activityWidth, minWidth: activityWidth, maxWidth: activityWidth }}>
+                      <td className={`sticky left-0 z-[15] bg-white p-3 border-r border-slate-50 font-bold text-[11px] pointer-events-none ${activity.isParent ? 'text-slate-900' : 'text-slate-600'}`} style={{ width: activityWidth, minWidth: activityWidth, maxWidth: activityWidth }}>
                         {label}
                       </td>
-                      <td className="sticky z-[15] bg-white p-3 text-center font-bold text-indigo-600 border-r border-slate-50 text-[10px]" style={{ left: activityWidth, width: 128, minWidth: 128 }}>{getDateRangeStr(activity.planStart, activity.planDuration)}</td>
+                      <td className="sticky z-[15] bg-white p-3 text-center font-bold text-indigo-600 border-r border-slate-50 text-[10px] pointer-events-none" style={{ left: activityWidth, width: 128, minWidth: 128 }}>{getDateRangeStr(activity.planStart, activity.planDuration)}</td>
                       <td className="p-0 relative bg-white h-[60px]">
                         {/* Background Grid Lines */}
                         <div className="flex h-full absolute inset-0 pointer-events-none">
