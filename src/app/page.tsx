@@ -26,6 +26,7 @@ interface Activity {
   workItemType?: string;
   parentKind?: 'Épico' | 'Demanda';
   isDateLocked?: boolean;
+  sprintName?: string;
 }
 
 type ParentKind = 'Épico' | 'Demanda';
@@ -167,6 +168,13 @@ const normalizeWorkItemType = (row: Record<string, string | number | null | unde
 
 const isParentWorkItemType = (type: string) => type === 'Épico' || type === 'Demanda';
 
+const extractSprintName = (row: Record<string, string | number | null | undefined>): string | undefined => {
+  const path = String(row['Iteration Path'] ?? '').trim();
+  if (!path) return undefined;
+  const segments = path.split('\\');
+  return segments[segments.length - 1];
+};
+
 const rowHasStartDate = (row: Record<string, string | number | null | undefined>) => {
   const start = row['Start Date'] ?? row['Start Date '];
   return start != null && String(start).trim() !== '';
@@ -248,6 +256,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           isParent: true,
           workItemType,
           parentKind,
+          sprintName: extractSprintName(row),
           effortTotal: 0,
           childrenCount: 0,
           assignedTo: row['Assigned To'] as string,
@@ -266,6 +275,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           isParent: true,
           workItemType,
           parentKind,
+          sprintName: extractSprintName(row),
           effortTotal: 0,
           childrenCount: 0,
           assignedTo: row['Assigned To'] as string,
@@ -295,6 +305,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
         isChild: true,
         workItemType,
         parentKind: currentParent?.parentKind ?? 'Épico',
+        sprintName: extractSprintName(row),
         effortPoints: effort,
         parentId: currentParent?.id,
         assignedTo: row['Assigned To'] as string
@@ -382,6 +393,7 @@ const App = () => {
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [collapsedParents, setCollapsedParents] = useState<Set<string | number>>(new Set());
+  const [showActualBars, setShowActualBars] = useState(true);
 
   const [undoStack, setUndoStack] = useState<Activity[][]>([]);
   const [redoStack, setRedoStack] = useState<Activity[][]>([]);
@@ -528,6 +540,23 @@ const App = () => {
       };
     });
   }, [getDateFromDay, periodCount]);
+
+  const sprints = useMemo(() => {
+    const sprintMap = new Map<string, { label: string; minStart: number; maxEnd: number }>();
+    for (const act of filteredActivities) {
+      const name = act.sprintName;
+      if (!name) continue;
+      const entry = sprintMap.get(name) ?? { label: name, minStart: Infinity, maxEnd: -Infinity };
+      const end = act.planStart + act.planDuration;
+      entry.minStart = Math.min(entry.minStart, act.planStart);
+      entry.maxEnd = Math.max(entry.maxEnd, end);
+      sprintMap.set(name, entry);
+    }
+    return Array.from(sprintMap.values())
+      .map(s => ({ label: s.label, startDay: s.minStart, endDay: Math.max(s.minStart + 1, s.maxEnd) }))
+      .sort((a, b) => a.startDay - b.startDay)
+      .map((s, idx) => ({ ...s, index: idx + 1 }));
+  }, [filteredActivities]);
 
   // Global mouse event listener for both Column Resize and Bar Dragging
   useEffect(() => {
@@ -922,6 +951,16 @@ const App = () => {
                 <LegendItem colorClass="bg-indigo-200 border-indigo-300" label="Planejado" />
                 <LegendItem colorClass="bg-emerald-500 border-emerald-600" label="Progresso" />
                 <LegendItem colorClass="bg-rose-500 border-rose-600" label="Atraso" />
+                <button
+                  onClick={() => setShowActualBars(prev => !prev)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer active:scale-95 ${
+                    showActualBars
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                      : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200'
+                  }`}
+                >
+                  {showActualBars ? '🔵' : '⚪'} Real
+                </button>
               </div>
           </div>
         </div>
@@ -962,6 +1001,23 @@ const App = () => {
                         className="h-8 flex items-center justify-center border-l border-slate-100 font-extrabold text-[9px] text-slate-600 bg-slate-50/50 uppercase tracking-widest"
                       >
                         {month.label}
+                      </div>
+                    ))}
+                  </div>
+                  {/* Sprint Row */}
+                  <div className="flex border-b border-slate-100">
+                    {sprints.map(s => (
+                      <div 
+                        key={s.index}
+                        style={{ 
+                          minWidth: `${(s.endDay - s.startDay) * DAY_WIDTH}px`, 
+                          width: `${(s.endDay - s.startDay) * DAY_WIDTH}px`
+                        }}
+                        className={`h-5 flex items-center justify-center border-l border-slate-200 font-extrabold text-[8px] tracking-widest ${
+                          s.index % 2 === 0 ? 'bg-indigo-50/60 text-indigo-600' : 'bg-white text-slate-500'
+                        }`}
+                      >
+                        {s.label}
                       </div>
                     ))}
                   </div>
@@ -1060,8 +1116,25 @@ const App = () => {
                       <td className="p-0 relative bg-white h-[60px]">
                         {/* Background Grid Lines */}
                         <div className="flex h-full absolute inset-0 pointer-events-none">
-                          {daysData.map(p => (
-                            <div key={p.num} style={{ minWidth: DAY_WIDTH, width: DAY_WIDTH }} className="border-l border-slate-50" />
+                          {daysData.map(p => {
+                            const isSprintStart = sprints.some(s => s.startDay === p.num);
+                            return (
+                              <div key={p.num} style={{ minWidth: DAY_WIDTH, width: DAY_WIDTH }} className={`border-l ${isSprintStart ? 'border-indigo-300' : 'border-slate-50'} ${isSprintStart ? 'border-l-2' : ''}`} />
+                            );
+                          })}
+                        </div>
+                        {/* Sprint background shading */}
+                        <div className="flex h-full absolute inset-0 pointer-events-none">
+                          {sprints.map(s => (
+                            <div
+                              key={s.index}
+                              style={{
+                                minWidth: `${(s.endDay - s.startDay) * DAY_WIDTH}px`,
+                                width: `${(s.endDay - s.startDay) * DAY_WIDTH}px`,
+                                left: `${s.startDay * DAY_WIDTH}px`,
+                              }}
+                              className={`h-full absolute ${s.index % 2 === 0 ? 'bg-indigo-50/20' : ''}`}
+                            />
                           ))}
                         </div>
                         
@@ -1094,6 +1167,7 @@ const App = () => {
                           />
                         </div>
 
+                        {showActualBars && (
                         <div 
                           className={`absolute bottom-[3px] h-[22px] rounded-lg cursor-grab shadow-md flex overflow-hidden z-10 select-none active:cursor-grabbing hover:shadow-lg transition-all group/actual ${
                             activity.isActualPlaceholder ? 'bg-slate-400 border border-slate-500' : ''
@@ -1129,6 +1203,7 @@ const App = () => {
                             />
                           </div>
                         </div>
+                        )}
                       </td>
                     </tr>
                   </React.Fragment>
