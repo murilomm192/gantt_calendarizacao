@@ -34,11 +34,11 @@ type DisplayRow =
   | { type: 'section'; label: string; kind: ParentKind }
   | { type: 'activity'; activity: Activity };
 
-const compareByActualDate = (a: Activity, b: Activity) => {
-  const startDiff = a.actualStart - b.actualStart;
+const compareByPlanDate = (a: Activity, b: Activity) => {
+  const startDiff = a.planStart - b.planStart;
   if (startDiff !== 0) return startDiff;
-  const endA = a.actualStart + a.actualDuration;
-  const endB = b.actualStart + b.actualDuration;
+  const endA = a.planStart + a.planDuration;
+  const endB = b.planStart + b.planDuration;
   if (endA !== endB) return endA - endB;
   return String(a.name).localeCompare(String(b.name), 'pt-BR');
 };
@@ -53,13 +53,13 @@ const sortAndGroupActivities = (activities: Activity[]): Activity[] => {
   }
 
   const parents = activities.filter(a => a.isParent);
-  const epicParents = parents.filter(p => p.workItemType !== 'Demanda').sort(compareByActualDate);
-  const demandaParents = parents.filter(p => p.workItemType === 'Demanda').sort(compareByActualDate);
+  const epicParents = parents.filter(p => p.workItemType !== 'Demanda').sort(compareByPlanDate);
+  const demandaParents = parents.filter(p => p.workItemType === 'Demanda').sort(compareByPlanDate);
 
   const ordered: Activity[] = [];
   for (const parent of [...epicParents, ...demandaParents]) {
     ordered.push(parent);
-    const children = (childrenByParent.get(parent.id) ?? []).sort(compareByActualDate);
+    const children = (childrenByParent.get(parent.id) ?? []).sort(compareByPlanDate);
     ordered.push(...children);
   }
 
@@ -105,7 +105,7 @@ interface DragState {
 // --- Initial Data ---
 const initialActivities: Activity[] = [];
 
-const DAY_WIDTH = 24; // Increased for better readability
+const DAY_WIDTH = 18;
 const ONE_DAY_MS = 1000 * 60 * 60 * 24;
 
 // --- CSV Parsing Utility ---
@@ -445,7 +445,7 @@ const App = () => {
     filteredActivities.forEach(act => {
       maxEnd = Math.max(maxEnd, act.planStart + act.planDuration, act.actualStart + act.actualDuration);
     });
-    return maxEnd + 10; // Extra padding for visualization
+    return maxEnd + 5; // Extra padding for visualization
   }, [filteredActivities]);
 
   const todayOffset = useMemo(() => {
@@ -458,7 +458,7 @@ const App = () => {
   const isTodayVisible = todayOffset >= 0 && todayOffset < periodCount;
 
   // Resizing state for the "Activity" column
-  const [activityWidth, setActivityWidth] = useState(320);
+  const [activityWidth, setActivityWidth] = useState(260);
   const [isResizingCol, setIsResizingCol] = useState(false);
   
   // Dragging state for Gantt bars
@@ -578,7 +578,7 @@ const App = () => {
 
     const handleMouseUp = () => {
       setIsResizingCol(false);
-      if (dragState) {
+    if (isResizingCol || dragState) {
         setUndoStack(prev => {
           const next = [...prev, activitiesRef.current];
           return next.length > 50 ? next.slice(-50) : next;
@@ -588,7 +588,7 @@ const App = () => {
       setDragState(null);
     };
 
-    if (isResizingCol || dragState) {
+    if (dragState) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
       document.body.style.userSelect = 'none'; // Prevent text selection
@@ -813,72 +813,72 @@ const App = () => {
   };
 
   const LegendItem = ({ colorClass, label }: { colorClass: string; label: string }) => (
-    <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
-      <div className={`w-4 h-4 rounded-sm border border-slate-300 ${colorClass}`}></div>
+    <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-600">
+      <div className={`w-3 h-3 rounded-sm border border-slate-300 ${colorClass}`}></div>
       <span>{label}</span>
     </div>
   );
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans">
-      <div className="max-w-[1800px] mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200">
+      <div className="max-w-[1600px] mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200">
         
         {/* Header Section */}
-        <div className="p-8 border-b border-slate-100 bg-white">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-600 rounded-lg text-white">
-                  <Calendar size={28} />
+        <div className="p-5 border-b border-slate-100 bg-white">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-indigo-600 rounded-lg text-white">
+                  <Calendar size={20} />
                 </div>
-                <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Estratégia de Portfólio</h1>
+                <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">Estratégia de Portfólio</h1>
                 {isDirty && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-bold animate-pulse border border-amber-200">
-                    <AlertCircle size={12} />
+                  <div className="flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-bold animate-pulse border border-amber-200">
+                    <AlertCircle size={10} />
                     <span>Alterações Pendentes</span>
                   </div>
                 )}
               </div>
-              <p className="text-slate-500 font-medium text-sm max-w-md">Visualização e planejamento de épicos e demandas trimestrais com sincronização em tempo real.</p>
+              <p className="text-slate-500 font-medium text-xs">Visualização e planejamento de épicos e demandas trimestrais com sincronização em tempo real.</p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-3">
                {/* Primary Actions */}
-                <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
                    <button
                      onClick={handleUndo}
                      disabled={!canUndo}
-                     className={`p-2 rounded-lg text-sm font-bold shadow-sm transition-all border ${
+                     className={`p-1.5 rounded-lg text-xs font-bold shadow-sm transition-all border ${
                        canUndo
                          ? 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200 active:scale-95 cursor-pointer'
                          : 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed'
                      }`}
                      title="Desfazer (Ctrl+Z)"
                    >
-                     <Undo2 size={16} />
+                     <Undo2 size={14} />
                    </button>
                    <button
                      onClick={handleRedo}
                      disabled={!canRedo}
-                     className={`p-2 rounded-lg text-sm font-bold shadow-sm transition-all border ${
+                     className={`p-1.5 rounded-lg text-xs font-bold shadow-sm transition-all border ${
                        canRedo
                          ? 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200 active:scale-95 cursor-pointer'
                          : 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed'
                      }`}
                      title="Refazer (Ctrl+Shift+Z)"
                    >
-                     <Redo2 size={16} />
+                     <Redo2 size={14} />
                    </button>
                    <button 
                      onClick={handleSave}
                     disabled={!isDirty || isSaving}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-all ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all ${
                       isDirty 
                         ? 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 cursor-pointer' 
                         : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                     }`}
                   >
-                    {isSaving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
+                    {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
                     <span>{isSaving ? 'Salvando...' : 'Salvar'}</span>
                   </button>
                   <button 
@@ -887,18 +887,18 @@ const App = () => {
                         window.location.reload()
                       }
                     }}
-                    className="flex items-center gap-2 px-4 py-2 bg-white text-slate-600 rounded-lg hover:bg-slate-50 text-sm font-bold transition-all border border-slate-200 active:scale-95"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-600 rounded-lg hover:bg-slate-50 text-xs font-bold transition-all border border-slate-200 active:scale-95"
                     title="Descartar alterações e recarregar"
                   >
-                    <RefreshCw size={16} />
+                    <RefreshCw size={14} />
                     <span>Recarregar</span>
                   </button>
                </div>
 
                {/* Import/Export */}
                <div className="flex items-center gap-2">
-                 <label className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900 cursor-pointer transition-all text-sm font-bold shadow-sm active:scale-95">
-                    <Upload size={16} />
+                 <label className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-900 cursor-pointer transition-all text-xs font-bold shadow-sm active:scale-95">
+                    <Upload size={14} />
                     <span>Importar CSV</span>
                     <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
                   </label>
@@ -906,11 +906,11 @@ const App = () => {
             </div>
           </div>
 
-          <div className="mt-8 flex flex-wrap items-center gap-6 py-4 px-6 bg-slate-50/50 rounded-2xl border border-slate-100">
-              <div className="flex items-center gap-3 pr-6 border-r border-slate-200">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Responsável:</span>
+          <div className="mt-4 flex flex-wrap items-center gap-3 py-2.5 px-4 bg-slate-50/50 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-2 pr-4 border-r border-slate-200">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Responsável:</span>
                 <select 
-                  className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm font-semibold text-slate-700 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all min-w-[160px]"
+                  className="px-2 py-1 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all min-w-[140px]"
                   value={assignedToFilter}
                   onChange={(e) => setAssignedToFilter(e.target.value)}
                 >
@@ -918,10 +918,10 @@ const App = () => {
                   {assignees.map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
               </div>
-              <div className="flex flex-wrap gap-6 ml-auto">
+              <div className="flex flex-wrap gap-4 ml-auto">
                 <LegendItem colorClass="bg-indigo-200 border-indigo-300" label="Planejado" />
                 <LegendItem colorClass="bg-emerald-500 border-emerald-600" label="Progresso" />
-                <LegendItem colorClass="bg-rose-500 border-rose-600" label="Atraso / Overage" />
+                <LegendItem colorClass="bg-rose-500 border-rose-600" label="Atraso" />
               </div>
           </div>
         </div>
@@ -932,16 +932,21 @@ const App = () => {
             <thead className="sticky top-0 bg-white z-30 shadow-sm">
               <tr className="border-b border-slate-200">
                 <th 
-                  className="p-4 text-left font-bold uppercase tracking-wider text-slate-400 relative bg-white"
-                  style={{ width: activityWidth }}
+                  className="sticky left-0 z-30 p-3 text-left font-bold uppercase tracking-wider text-slate-400 bg-white text-[10px]"
+                  style={{ width: activityWidth, minWidth: activityWidth }}
                 >
                   Atividade
                   <div 
-                    className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-400 bg-slate-100 z-40 transition-colors"
+                    className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-400 bg-slate-100 transition-colors"
                     onMouseDown={handleColMouseDown}
                   />
                 </th>
-                <th className="p-4 text-center w-40 font-bold uppercase tracking-wider text-slate-400 bg-white">Cronograma</th>
+                <th 
+                  className="sticky z-30 p-3 text-center font-bold uppercase tracking-wider text-slate-400 bg-white text-[10px]"
+                  style={{ left: activityWidth, width: 128, minWidth: 128 }}
+                >
+                  Cronograma
+                </th>
                 
                 {/* Timeline Header */}
                 <th className="p-0 bg-white relative">
@@ -954,7 +959,7 @@ const App = () => {
                           minWidth: `${month.days * DAY_WIDTH}px`, 
                           width: `${month.days * DAY_WIDTH}px`
                         }}
-                        className="h-10 flex items-center justify-center border-l border-slate-100 font-extrabold text-[10px] text-slate-600 bg-slate-50/50 uppercase tracking-widest"
+                        className="h-8 flex items-center justify-center border-l border-slate-100 font-extrabold text-[9px] text-slate-600 bg-slate-50/50 uppercase tracking-widest"
                       >
                         {month.label}
                       </div>
@@ -966,7 +971,7 @@ const App = () => {
                       <div 
                         key={p.num} 
                         style={{ minWidth: DAY_WIDTH, width: DAY_WIDTH }}
-                        className={`h-8 flex items-center justify-center border-l border-slate-50 font-bold text-[10px] transition-colors text-slate-400 hover:bg-slate-50`}
+                        className={`h-7 flex items-center justify-center border-l border-slate-50 font-bold text-[9px] transition-colors text-slate-400 hover:bg-slate-50`}
                       >
                         {p.label}
                       </div>
@@ -974,10 +979,10 @@ const App = () => {
                   </div>
                   {isTodayVisible && (
                     <div
-                      className="absolute top-0 bottom-0 w-[3px] bg-red-500 z-20 pointer-events-none"
+                      className="absolute top-0 bottom-0 w-[2px] bg-red-500 z-20 pointer-events-none"
                       style={{ left: `${todayOffset * DAY_WIDTH}px` }}
                     >
-                      <div className="absolute -top-1 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap">
+                      <div className="absolute -top-[3px] left-1/2 -translate-x-1/2 bg-red-500 text-white text-[7px] font-bold px-1 py-[1px] rounded whitespace-nowrap leading-none">
                         Hoje
                       </div>
                     </div>
@@ -991,9 +996,13 @@ const App = () => {
                 if (row.type === 'section') {
                   return (
                     <tr key={`section-${row.kind}`} className="border-y bg-slate-100/90 text-slate-700 border-slate-200">
-                      <td colSpan={3} className="px-4 py-2 text-xs font-black uppercase tracking-widest">
+                      <td className="sticky left-0 z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest" style={{ width: activityWidth, minWidth: activityWidth }}>
                         {row.label}
                       </td>
+                      <td className="sticky z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest" style={{ left: activityWidth, width: 128, minWidth: 128 }}>
+                        {row.label}
+                      </td>
+                      <td className="px-3 py-1.5" />
                     </tr>
                   );
                 }
@@ -1012,31 +1021,31 @@ const App = () => {
                 const label = (
                    <div className={`flex flex-col gap-1.5 w-full ${activity.isChild ? 'pl-8' : 'pl-2'}`}>
                      <div className="flex items-center gap-2 pr-4">
-                       {activity.isParent ? (
-                         <button 
-                           onClick={() => toggleCollapsed(activity.id)}
-                           className="p-0.5 hover:bg-slate-200 rounded transition-colors"
-                         >
-                           {isCollapsed ? <ChevronRight size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
-                         </button>
-                       ) : (
-                         <div className="w-[18px]" /> // Spacer for child alignment
-                       )}
-                       <span className={`truncate ${activity.isParent ? 'font-extrabold text-slate-900' : 'text-slate-600 font-medium'}`} title={activity.name}>
-                          {activity.name}
-                       </span>
-                     </div>
-                     {activity.isParent && (
-                       <div className="flex gap-2 pl-[24px]">
-                         <span className="text-[9px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold border border-indigo-100">{activity.childrenCount} itens</span>
-                         <span className="text-[9px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortTotal} pts</span>
-                       </div>
-                     )}
-                     {activity.isChild && (
-                       <div className="flex gap-2 pl-[24px]">
-                         <span className="text-[9px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortPoints} pts</span>
-                       </div>
-                     )}
+                        {activity.isParent ? (
+                          <button 
+                            onClick={() => toggleCollapsed(activity.id)}
+                            className="p-0.5 hover:bg-slate-200 rounded transition-colors"
+                          >
+                            {isCollapsed ? <ChevronRight size={12} className="text-slate-500" /> : <ChevronDown size={12} className="text-slate-500" />}
+                          </button>
+                        ) : (
+                          <div className="w-4" />
+                        )}
+                        <span className={`truncate text-[11px] ${activity.isParent ? 'font-extrabold text-slate-900' : 'text-slate-600 font-medium'}`} title={activity.name}>
+                           {activity.name}
+                        </span>
+                      </div>
+                      {activity.isParent && (
+                        <div className="flex gap-1.5 pl-[20px]">
+                          <span className="text-[8px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold border border-indigo-100">{activity.childrenCount} itens</span>
+                          <span className="text-[8px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortTotal} pts</span>
+                        </div>
+                      )}
+                      {activity.isChild && (
+                        <div className="flex gap-1.5 pl-[20px]">
+                          <span className="text-[8px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortPoints} pts</span>
+                        </div>
+                      )}
                    </div>
                 );
 
@@ -1044,11 +1053,11 @@ const App = () => {
                   <React.Fragment key={activity.id}>
                     {/* ACTIVITY ROW */}
                     <tr className={`group transition-colors border-b border-slate-100 ${activity.isParent ? 'bg-slate-50/80' : 'hover:bg-slate-50/30'}`}>
-                      <td className={`p-4 border-r border-slate-50 font-bold ${activity.isParent ? 'text-slate-900' : 'text-slate-600'}`} style={{ width: activityWidth, minWidth: activityWidth, maxWidth: activityWidth }}>
+                      <td className={`sticky left-0 z-[15] bg-white p-3 border-r border-slate-50 font-bold text-[11px] ${activity.isParent ? 'text-slate-900' : 'text-slate-600'}`} style={{ width: activityWidth, minWidth: activityWidth, maxWidth: activityWidth }}>
                         {label}
                       </td>
-                      <td className="p-4 text-center font-bold text-indigo-600 border-r border-slate-50">{getDateRangeStr(activity.planStart, activity.planDuration)}</td>
-                      <td className="p-0 relative bg-white h-20">
+                      <td className="sticky z-[15] bg-white p-3 text-center font-bold text-indigo-600 border-r border-slate-50 text-[10px]" style={{ left: activityWidth, width: 128, minWidth: 128 }}>{getDateRangeStr(activity.planStart, activity.planDuration)}</td>
+                      <td className="p-0 relative bg-white h-[60px]">
                         {/* Background Grid Lines */}
                         <div className="flex h-full absolute inset-0 pointer-events-none">
                           {daysData.map(p => (
@@ -1058,14 +1067,14 @@ const App = () => {
                         
                         {isTodayVisible && (
                           <div
-                            className="absolute top-0 bottom-0 w-[2px] bg-red-500/70 z-20 pointer-events-none"
+                            className="absolute top-0 bottom-0 w-[1px] bg-red-500/70 z-20 pointer-events-none"
                             style={{ left: `${todayOffset * DAY_WIDTH}px` }}
                           />
                         )}
                         
                         {/* Interactive Plan Bar (Top Half) */}
                         <div 
-                          className="absolute h-7 bg-indigo-100 border border-indigo-200 rounded-lg shadow-sm flex items-center justify-center px-2 z-10 select-none group/bar top-2 cursor-grab hover:bg-indigo-200 hover:border-indigo-300 transition-colors active:cursor-grabbing"
+                          className="absolute h-[22px] bg-indigo-100 border border-indigo-200 rounded-lg shadow-sm flex items-center justify-center px-1.5 z-10 select-none group/bar top-[3px] cursor-grab hover:bg-indigo-200 hover:border-indigo-300 transition-colors active:cursor-grabbing"
                           style={{
                             left: `${activity.planStart * DAY_WIDTH}px`,
                             width: `${activity.planDuration * DAY_WIDTH}px`
@@ -1076,7 +1085,7 @@ const App = () => {
                             className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-400/30 rounded-l-lg opacity-0 group-hover/bar:opacity-100 transition-opacity"
                             onMouseDown={(e) => handleBarMouseDown(e, activity, 'plan', 'resize-start', activity.planStart, activity.planDuration)}
                           />
-                          <span className="text-[9px] text-indigo-800 font-bold truncate pointer-events-none tracking-tight">
+                          <span className="text-[8px] text-indigo-800 font-bold truncate pointer-events-none tracking-tight">
                             {getDateRangeStr(activity.planStart, activity.planDuration)}
                           </span>
                           <div 
@@ -1086,7 +1095,7 @@ const App = () => {
                         </div>
 
                         <div 
-                          className={`absolute bottom-2 h-7 rounded-lg cursor-grab shadow-md flex overflow-hidden z-10 select-none active:cursor-grabbing hover:shadow-lg transition-all group/actual ${
+                          className={`absolute bottom-[3px] h-[22px] rounded-lg cursor-grab shadow-md flex overflow-hidden z-10 select-none active:cursor-grabbing hover:shadow-lg transition-all group/actual ${
                             activity.isActualPlaceholder ? 'bg-slate-400 border border-slate-500' : ''
                           }`}
                           style={{
@@ -1111,7 +1120,7 @@ const App = () => {
                               className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-black/10 pointer-events-auto opacity-0 group-hover/actual:opacity-100"
                               onMouseDown={(e) => handleBarMouseDown(e, activity, 'actual', 'resize-start', activity.actualStart, activity.actualDuration)}
                             />
-                            <span className="text-[9px] text-white font-black drop-shadow-sm truncate pointer-events-none tracking-tight">
+                            <span className="text-[8px] text-white font-black drop-shadow-sm truncate pointer-events-none tracking-tight">
                               {getDateRangeStr(activity.actualStart, activity.actualDuration)}
                             </span>
                             <div 
@@ -1130,10 +1139,10 @@ const App = () => {
         </div>
 
         {/* Footer Info */}
-        <div className="p-6 bg-slate-50 border-t border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4 text-xs font-bold text-slate-500">
-          <div className="flex items-center gap-6">
-            <span className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg border border-slate-200 shadow-sm"><Info size={14} className="text-indigo-500"/> Arraste o centro das barras para mover</span>
-            <span className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg border border-slate-200 shadow-sm"><Target size={14} className="text-emerald-500"/> Arraste as bordas para redimensionar</span>
+        <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col md:flex-row justify-between items-center gap-3 text-[10px] font-bold text-slate-500">
+          <div className="flex items-center gap-4">
+            <span className="flex items-center gap-1.5 px-2 py-1 bg-white rounded-lg border border-slate-200 shadow-sm"><Info size={12} className="text-indigo-500"/> Arraste o centro das barras para mover</span>
+            <span className="flex items-center gap-1.5 px-2 py-1 bg-white rounded-lg border border-slate-200 shadow-sm"><Target size={12} className="text-emerald-500"/> Arraste as bordas para redimensionar</span>
           </div>
           <div className="flex items-center gap-2 text-slate-300 tracking-widest uppercase">
             <span>Portfolio Strategy</span>

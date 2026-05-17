@@ -138,7 +138,7 @@ export function getResumoData(): ResumoData {
     const sprintIndex = Math.max(0, Math.floor(diffMs / SPRINT_MS));
     const sprintStart = new Date(minDate.getTime() + sprintIndex * SPRINT_MS);
     const sprintEnd = new Date(sprintStart.getTime() + 13 * 24 * 60 * 60 * 1000);
-    const label = `Sprint ${sprintIndex + 1} (${formatDateRange(sprintStart, sprintEnd)})`;
+    const label = `S${sprintIndex + 1} (${formatDateRange(sprintStart, sprintEnd)})`;
 
     sprintMap.set(label, (sprintMap.get(label) ?? 0) + effort);
   }
