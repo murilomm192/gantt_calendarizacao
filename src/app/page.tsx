@@ -23,7 +23,75 @@ interface Activity {
   effortTotal?: number;
   actualStartDateMs?: number; // Internal for parent calculation
   actualEndDateMs?: number;   // Internal for parent calculation
+  workItemType?: string;
+  parentKind?: 'Épico' | 'Demanda';
+  isDateLocked?: boolean;
 }
+
+type ParentKind = 'Épico' | 'Demanda';
+
+type DisplayRow =
+  | { type: 'section'; label: string; kind: ParentKind }
+  | { type: 'activity'; activity: Activity };
+
+const compareByActualDate = (a: Activity, b: Activity) => {
+  const startDiff = a.actualStart - b.actualStart;
+  if (startDiff !== 0) return startDiff;
+  const endA = a.actualStart + a.actualDuration;
+  const endB = b.actualStart + b.actualDuration;
+  if (endA !== endB) return endA - endB;
+  return String(a.name).localeCompare(String(b.name), 'pt-BR');
+};
+
+const sortAndGroupActivities = (activities: Activity[]): Activity[] => {
+  const childrenByParent = new Map<string | number, Activity[]>();
+  for (const act of activities) {
+    if (!act.isChild || act.parentId == null) continue;
+    const list = childrenByParent.get(act.parentId) ?? [];
+    list.push(act);
+    childrenByParent.set(act.parentId, list);
+  }
+
+  const parents = activities.filter(a => a.isParent);
+  const epicParents = parents.filter(p => p.workItemType !== 'Demanda').sort(compareByActualDate);
+  const demandaParents = parents.filter(p => p.workItemType === 'Demanda').sort(compareByActualDate);
+
+  const ordered: Activity[] = [];
+  for (const parent of [...epicParents, ...demandaParents]) {
+    ordered.push(parent);
+    const children = (childrenByParent.get(parent.id) ?? []).sort(compareByActualDate);
+    ordered.push(...children);
+  }
+
+  const groupedIds = new Set(ordered.map(a => a.id));
+  const orphans = activities.filter(a => !groupedIds.has(a.id));
+  return [...ordered, ...orphans];
+};
+
+const getParentKind = (activity: Activity): ParentKind =>
+  activity.workItemType === 'Demanda' || activity.parentKind === 'Demanda' ? 'Demanda' : 'Épico';
+
+const buildDisplayRows = (activities: Activity[]): DisplayRow[] => {
+  const rows: DisplayRow[] = [];
+  let lastSection: ParentKind | null = null;
+
+  for (const activity of activities) {
+    if (activity.isParent) {
+      const section = getParentKind(activity);
+      if (section !== lastSection) {
+        rows.push({
+          type: 'section',
+          label: section === 'Demanda' ? 'Demandas' : 'Épicos',
+          kind: section,
+        });
+        lastSection = section;
+      }
+    }
+    rows.push({ type: 'activity', activity });
+  }
+
+  return rows;
+};
 
 interface DragState {
   id: string | number;
@@ -94,15 +162,55 @@ const parseCSV = (text: string) => {
   return { headers, result, separator };
 };
 
+const normalizeWorkItemType = (row: Record<string, string | number | null | undefined>) =>
+  String(row['Work Item Type'] ?? row['Work Item Type '] ?? '').trim();
+
+const isParentWorkItemType = (type: string) => type === 'Épico' || type === 'Demanda';
+
+const rowHasStartDate = (row: Record<string, string | number | null | undefined>) => {
+  const start = row['Start Date'] ?? row['Start Date '];
+  return start != null && String(start).trim() !== '';
+};
+
+const spanFromActivatedAndStateChange = (
+  getDayDifference: (date: Date | null) => number,
+  activated: Date | null,
+  stateChange: Date | null,
+  fallbackStart = 0,
+) => {
+  const startDay = activated
+    ? getDayDifference(activated)
+    : stateChange
+      ? getDayDifference(stateChange)
+      : fallbackStart;
+  const endDay = stateChange
+    ? getDayDifference(stateChange)
+    : activated
+      ? getDayDifference(activated)
+      : startDay + 1;
+  return {
+    start: startDay,
+    duration: Math.max(1, endDay - startDay),
+  };
+};
+
 const processCSVData = (data: Record<string, string | number | null | undefined>[]) => {
   let minTime = Infinity;
-  // Adjusted filter to include 'Assigned To'
-  const validRows = data.filter(r => (r['Work Item Type'] ?? r.Title) && r['Start Date']);
-  
-  validRows.forEach(row => {
-    const start = parseDate(row['Start Date'] as string);
-    if (start && start.getTime() < minTime) {
-      minTime = start.getTime();
+  // Parents (Épico/Demanda) may have no Start Date in ADO exports; children still need them
+  const validRows = data.filter((r) => {
+    const type = normalizeWorkItemType(r);
+    if (!type && !r.Title) return false;
+    if (isParentWorkItemType(type)) return true;
+    return rowHasStartDate(r);
+  });
+
+  const dateFields = ['Start Date', 'Target Date', 'Activated Date', 'State Change Date'] as const;
+  validRows.forEach((row) => {
+    for (const field of dateFields) {
+      const parsed = parseDate(row[field] as string);
+      if (parsed && parsed.getTime() < minTime) {
+        minTime = parsed.getTime();
+      }
     }
   });
 
@@ -117,6 +225,8 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
 
   const activities: Activity[] = [];
   const assignees = new Set<string>();
+  const parentsWithoutPlanDates = new Set<string | number>();
+  const demandasNeedingChildSpan = new Set<string | number>();
   let currentParent: Activity | null = null;
 
   for (const row of validRows) {
@@ -124,9 +234,9 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
     const assignee = row['Assigned To'] as string;
     if (assignee) assignees.add(assignee);
     
-    const workItemType = (row['Work Item Type'] ?? row['Work Item Type '] ?? '') as string;
+    const workItemType = normalizeWorkItemType(row);
     const workItemTitle = (row['Work Item Title'] ?? row['Work Item Title '] ?? row.Title ?? 'Sem título') as string;
-    const isParentItem = workItemType === 'Épico' || workItemType === 'Demanda';
+    const isParentItem = isParentWorkItemType(workItemType);
     
     const start = parseDate(row['Start Date'] as string);
     const target = parseDate(row['Target Date'] as string);
@@ -144,22 +254,55 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
     else if (state.includes('doing') || state.includes('developing') || state.includes('active')) percentComplete = 50;
 
     if (isParentItem) {
-      currentParent = {
-        id: (row.ID as string) ?? `p-${activities.length}`,
-        name: workItemTitle,
-        planStart: planStartDay,
-        planDuration: planEndDay ? Math.max(1, planEndDay - planStartDay) : 7,
-        actualStart: planStartDay, // Default, will be updated by children
-        actualDuration: 3,        // Default placeholder
-        isActualPlaceholder: true, // Start as placeholder
-        percentComplete: percentComplete,
-        isParent: true,
-        effortTotal: 0,
-        childrenCount: 0,
-        assignedTo: row['Assigned To'] as string,
-        actualStartDateMs: Infinity,
-        actualEndDateMs: -Infinity
-      };
+      const parentKind: ParentKind = workItemType === 'Demanda' ? 'Demanda' : 'Épico';
+      const isDemanda = parentKind === 'Demanda';
+
+      if (isDemanda) {
+        const hasActivatedOrState = !!(activated || stateChange);
+        const span = spanFromActivatedAndStateChange(
+          getDayDifference,
+          activated,
+          stateChange,
+          planStartDay,
+        );
+        currentParent = {
+          id: (row.ID as string) ?? `p-${activities.length}`,
+          name: workItemTitle,
+          planStart: span.start,
+          planDuration: span.duration,
+          actualStart: span.start,
+          actualDuration: span.duration,
+          isActualPlaceholder: !hasActivatedOrState,
+          percentComplete: percentComplete,
+          isParent: true,
+          workItemType,
+          parentKind,
+          effortTotal: 0,
+          childrenCount: 0,
+          assignedTo: row['Assigned To'] as string,
+        };
+        if (!hasActivatedOrState) demandasNeedingChildSpan.add(currentParent.id);
+      } else {
+        currentParent = {
+          id: (row.ID as string) ?? `p-${activities.length}`,
+          name: workItemTitle,
+          planStart: planStartDay,
+          planDuration: planEndDay ? Math.max(1, planEndDay - planStartDay) : 7,
+          actualStart: planStartDay,
+          actualDuration: 3,
+          isActualPlaceholder: true,
+          percentComplete: percentComplete,
+          isParent: true,
+          workItemType,
+          parentKind,
+          effortTotal: 0,
+          childrenCount: 0,
+          assignedTo: row['Assigned To'] as string,
+          actualStartDateMs: Infinity,
+          actualEndDateMs: -Infinity,
+        };
+        if (!start) parentsWithoutPlanDates.add(currentParent.id);
+      }
       activities.push(currentParent);
     } else {
       const planDurationDays = planEndDay ? Math.max(1, planEndDay - planStartDay) : 7;
@@ -179,6 +322,8 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
         actualDuration: actualDurationDays,
         percentComplete: percentComplete,
         isChild: true,
+        workItemType,
+        parentKind: currentParent?.parentKind ?? 'Épico',
         effortPoints: effort,
         parentId: currentParent?.id,
         assignedTo: row['Assigned To'] as string
@@ -189,9 +334,13 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
       if (currentParent) {
         currentParent.childrenCount = (currentParent.childrenCount ?? 0) + 1;
         currentParent.effortTotal = (currentParent.effortTotal ?? 0) + effort;
-        currentParent.isActualPlaceholder = false; // Has children, not a placeholder anymore
-        
-        // Update parent actual boundaries based on children
+
+        // Demanda dates come only from Activated/State Change (row or children rollup)
+        if (currentParent.workItemType === 'Demanda') continue;
+
+        currentParent.isActualPlaceholder = false;
+
+        // Update Épico parent actual boundaries based on children
         if (activated) {
           currentParent.actualStartDateMs = Math.min(currentParent.actualStartDateMs!, activated.getTime());
         } else if (start) {
@@ -219,7 +368,39 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
     }
   }
 
-  return { mapped: activities, minTime, assignees: Array.from(assignees).sort() };
+  // Épicos without plan dates: derive plan span from children's Start/Target
+  for (const parent of activities.filter((a) => a.isParent && parentsWithoutPlanDates.has(a.id))) {
+    const children = activities.filter((c) => c.parentId === parent.id);
+    if (children.length === 0) continue;
+
+    const planStarts = children.map((c) => c.planStart);
+    const planEnds = children.map((c) => c.planStart + c.planDuration);
+    parent.planStart = Math.min(...planStarts);
+    parent.planDuration = Math.max(1, Math.max(...planEnds) - parent.planStart);
+
+    if (parent.isActualPlaceholder) {
+      parent.isActualPlaceholder = false;
+      parent.actualStart = Math.min(...children.map((c) => c.actualStart));
+      const actualEnd = Math.max(...children.map((c) => c.actualStart + c.actualDuration));
+      parent.actualDuration = Math.max(1, actualEnd - parent.actualStart);
+    }
+  }
+
+  // Demandas without row dates: plan = actual = children's Activated/State Change span
+  for (const parent of activities.filter((a) => a.isParent && demandasNeedingChildSpan.has(a.id))) {
+    const children = activities.filter((c) => c.parentId === parent.id);
+    if (children.length === 0) continue;
+
+    const start = Math.min(...children.map((c) => c.actualStart));
+    const end = Math.max(...children.map((c) => c.actualStart + c.actualDuration));
+    parent.planStart = start;
+    parent.planDuration = Math.max(1, end - start);
+    parent.actualStart = start;
+    parent.actualDuration = parent.planDuration;
+    parent.isActualPlaceholder = false;
+  }
+
+  return { mapped: sortAndGroupActivities(activities), minTime, assignees: Array.from(assignees).sort() };
 };
 
 const App = () => {
@@ -280,9 +461,12 @@ const App = () => {
       result = activities.filter(act => matchedIds.has(act.id));
     }
 
-    // Filter out children of collapsed parents
-    return result.filter(act => !act.parentId || !collapsedParents.has(act.parentId));
+    // Filter out children of collapsed parents, then group and sort by actual date
+    const visible = result.filter(act => !act.parentId || !collapsedParents.has(act.parentId));
+    return sortAndGroupActivities(visible);
   }, [activities, assignedToFilter, collapsedParents]);
+
+  const displayRows = useMemo(() => buildDisplayRows(filteredActivities), [filteredActivities]);
 
   // Dynamically calculate period count based on the filtered activity list
   const periodCount = useMemo(() => {
@@ -388,7 +572,7 @@ const App = () => {
 
         setActivities(prev => {
           const newActivities = prev.map(act => {
-            if (act.id !== dragState.id) return act;
+            if (act.id !== dragState.id || act.isDateLocked) return act;
 
             const isPlan = dragState.type === 'plan';
             const startKey = isPlan ? 'planStart' : 'actualStart';
@@ -486,10 +670,18 @@ const App = () => {
     startValRef.current = activityWidth;
   };
 
-  const handleBarMouseDown = (e: React.MouseEvent, id: string | number, type: 'plan' | 'actual', action: 'move' | 'resize-start' | 'resize-end', originalStart: number, originalDuration: number) => {
+  const handleBarMouseDown = (
+    e: React.MouseEvent,
+    activity: Activity,
+    type: 'plan' | 'actual',
+    action: 'move' | 'resize-start' | 'resize-end',
+    originalStart: number,
+    originalDuration: number,
+  ) => {
+    if (activity.isDateLocked) return;
     e.stopPropagation();
     setDragState({
-      id,
+      id: activity.id,
       type,
       action,
       startX: e.clientX,
@@ -824,7 +1016,18 @@ const App = () => {
             </thead>
             
             <tbody className="divide-y divide-slate-100">
-              {filteredActivities.map((activity, idx) => {
+              {displayRows.map((row) => {
+                if (row.type === 'section') {
+                  return (
+                    <tr key={`section-${row.kind}`} className="border-y bg-slate-100/90 text-slate-700 border-slate-200">
+                      <td colSpan={3} className="px-4 py-2 text-xs font-black uppercase tracking-widest">
+                        {row.label}
+                      </td>
+                    </tr>
+                  );
+                }
+
+                const activity = row.activity;
                 // Pre-calculate bar properties for accurate rendering
                 const planEnd = activity.planStart + activity.planDuration;
                 const actualEnd = activity.actualStart + activity.actualDuration;
@@ -891,27 +1094,26 @@ const App = () => {
                         
                         {/* Interactive Plan Bar (Top Half) */}
                         <div 
-                          className="absolute top-2 h-7 bg-indigo-100 border border-indigo-200 rounded-lg cursor-grab shadow-sm flex items-center justify-center px-2 z-10 select-none hover:bg-indigo-200 hover:border-indigo-300 transition-colors active:cursor-grabbing group/bar"
+                          className="absolute h-7 bg-indigo-100 border border-indigo-200 rounded-lg shadow-sm flex items-center justify-center px-2 z-10 select-none group/bar top-2 cursor-grab hover:bg-indigo-200 hover:border-indigo-300 transition-colors active:cursor-grabbing"
                           style={{
                             left: `${activity.planStart * DAY_WIDTH}px`,
                             width: `${activity.planDuration * DAY_WIDTH}px`
                           }}
-                          onMouseDown={(e) => handleBarMouseDown(e, activity.id, 'plan', 'move', activity.planStart, activity.planDuration)}
+                          onMouseDown={(e) => handleBarMouseDown(e, activity, 'plan', 'move', activity.planStart, activity.planDuration)}
                         >
                           <div 
                             className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-400/30 rounded-l-lg opacity-0 group-hover/bar:opacity-100 transition-opacity"
-                            onMouseDown={(e) => handleBarMouseDown(e, activity.id, 'plan', 'resize-start', activity.planStart, activity.planDuration)}
+                            onMouseDown={(e) => handleBarMouseDown(e, activity, 'plan', 'resize-start', activity.planStart, activity.planDuration)}
                           />
                           <span className="text-[9px] text-indigo-800 font-bold truncate pointer-events-none tracking-tight">
                             {getDateRangeStr(activity.planStart, activity.planDuration)}
                           </span>
                           <div 
                             className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-400/30 rounded-r-lg opacity-0 group-hover/bar:opacity-100 transition-opacity"
-                            onMouseDown={(e) => handleBarMouseDown(e, activity.id, 'plan', 'resize-end', activity.planStart, activity.planDuration)}
+                            onMouseDown={(e) => handleBarMouseDown(e, activity, 'plan', 'resize-end', activity.planStart, activity.planDuration)}
                           />
                         </div>
 
-                        {/* Interactive Actual Bar (Bottom Half) */}
                         <div 
                           className={`absolute bottom-2 h-7 rounded-lg cursor-grab shadow-md flex overflow-hidden z-10 select-none active:cursor-grabbing hover:shadow-lg transition-all group/actual ${
                             activity.isActualPlaceholder ? 'bg-slate-400 border border-slate-500' : ''
@@ -920,7 +1122,7 @@ const App = () => {
                             left: `${activity.actualStart * DAY_WIDTH}px`,
                             width: `${activity.actualDuration * DAY_WIDTH}px`
                           }}
-                          onMouseDown={(e) => handleBarMouseDown(e, activity.id, 'actual', 'move', activity.actualStart, activity.actualDuration)}
+                          onMouseDown={(e) => handleBarMouseDown(e, activity, 'actual', 'move', activity.actualStart, activity.actualDuration)}
                         >
                           {/* Inner structure for colors (Green vs Red) */}
                           <div className="flex w-full h-full pointer-events-none">
@@ -936,14 +1138,14 @@ const App = () => {
                           <div className="absolute inset-0 flex items-center justify-center px-2">
                             <div 
                               className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-black/10 pointer-events-auto opacity-0 group-hover/actual:opacity-100"
-                              onMouseDown={(e) => handleBarMouseDown(e, activity.id, 'actual', 'resize-start', activity.actualStart, activity.actualDuration)}
+                              onMouseDown={(e) => handleBarMouseDown(e, activity, 'actual', 'resize-start', activity.actualStart, activity.actualDuration)}
                             />
                             <span className="text-[9px] text-white font-black drop-shadow-sm truncate pointer-events-none tracking-tight">
                               {getDateRangeStr(activity.actualStart, activity.actualDuration)}
                             </span>
                             <div 
                               className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-black/10 pointer-events-auto opacity-0 group-hover/actual:opacity-100"
-                              onMouseDown={(e) => handleBarMouseDown(e, activity.id, 'actual', 'resize-end', activity.actualStart, activity.actualDuration)}
+                              onMouseDown={(e) => handleBarMouseDown(e, activity, 'actual', 'resize-end', activity.actualStart, activity.actualDuration)}
                             />
                           </div>
                         </div>
