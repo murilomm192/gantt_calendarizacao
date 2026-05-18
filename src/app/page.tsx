@@ -1,7 +1,8 @@
 'use client'
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Calendar, Info, Target, Upload, Save, RefreshCw, AlertCircle, ChevronRight, ChevronDown, Undo2, Redo2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Calendar, Info, Target, Upload, Save, RefreshCw, AlertCircle, ChevronRight, ChevronDown, Undo2, Redo2, X } from 'lucide-react';
 import { useToast } from '~/app/toast';
 
 interface Activity {
@@ -27,6 +28,7 @@ interface Activity {
   parentKind?: 'Épico' | 'Demanda';
   isDateLocked?: boolean;
   sprintName?: string;
+  tags?: string;
 }
 
 type ParentKind = 'Épico' | 'Demanda';
@@ -107,6 +109,7 @@ interface DragState {
 const initialActivities: Activity[] = [];
 
 const DAY_WIDTH = 18;
+const TAGS_WIDTH = 160;
 const ONE_DAY_MS = 1000 * 60 * 60 * 24;
 
 // --- CSV Parsing Utility ---
@@ -200,7 +203,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
     }
   });
 
-  if (minTime === Infinity) return { mapped: [] as Activity[], minTime: new Date().getTime(), assignees: [] as string[] };
+  if (minTime === Infinity) return { mapped: [] as Activity[], minTime: new Date().getTime(), assignees: [] as string[], tags: [] as string[] };
 
   const getDayDifference = (date: Date | null) => {
      if (!date) return 0;
@@ -211,9 +214,18 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
 
   const activities: Activity[] = [];
   const assignees = new Set<string>();
+  const allTags = new Set<string>();
   const parentsWithoutPlanDates = new Set<string | number>();
   const demandasNeedingChildSpan = new Set<string | number>();
   let currentParent: Activity | null = null;
+
+  const extractTags = (row: Record<string, string | number | null | undefined>): string | undefined => {
+    const raw = String(row['Tags'] ?? '').trim();
+    if (!raw) return undefined;
+    const tags = raw.split(';').map(t => t.trim()).filter(Boolean);
+    tags.forEach(t => allTags.add(t));
+    return tags.join(';');
+  };
 
   for (const row of validRows) {
     if (!row) continue;
@@ -257,6 +269,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           workItemType,
           parentKind,
           sprintName: extractSprintName(row),
+          tags: extractTags(row),
           effortTotal: 0,
           childrenCount: 0,
           assignedTo: row['Assigned To'] as string,
@@ -276,6 +289,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           workItemType,
           parentKind,
           sprintName: extractSprintName(row),
+          tags: extractTags(row),
           effortTotal: 0,
           childrenCount: 0,
           assignedTo: row['Assigned To'] as string,
@@ -306,6 +320,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
         workItemType,
         parentKind: currentParent?.parentKind ?? 'Épico',
         sprintName: extractSprintName(row),
+        tags: extractTags(row),
         effortPoints: effort,
         parentId: currentParent?.id,
         assignedTo: row['Assigned To'] as string
@@ -382,13 +397,229 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
     parent.isActualPlaceholder = false;
   }
 
-  return { mapped: sortAndGroupActivities(activities), minTime, assignees: Array.from(assignees).sort() };
+  return { mapped: sortAndGroupActivities(activities), minTime, assignees: Array.from(assignees).sort(), tags: Array.from(allTags).sort() };
+};
+
+const tagColorClass = (tag: string) => {
+  const key = tag.replace(/^[A-Z]+:\s*/i, '').toLowerCase();
+  switch (key) {
+    case 'done': return 'bg-green-100 text-green-700 border-green-200';
+    case 'at risk': return 'bg-orange-100 text-orange-700 border-orange-200';
+    case 'deprioritized': return 'bg-red-100 text-red-700 border-red-200';
+    default: return 'bg-indigo-100 text-indigo-700 border-indigo-200';
+  }
+};
+
+const TagMultiSelect = ({
+  allTags,
+  selectedTags,
+  setSelectedTags,
+}: {
+  allTags: string[];
+  selectedTags: Set<string>;
+  setSelectedTags: (fn: (prev: Set<string>) => Set<string>) => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node) &&
+          dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  useEffect(() => {
+    if (open && ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setDropdownStyle({
+        position: 'fixed',
+        top: rect.bottom + 4,
+        left: rect.left + rect.width / 2,
+        transform: 'translateX(-50%)',
+      });
+    }
+  }, [open]);
+
+  const toggle = (tag: string) => {
+    setSelectedTags(prev => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600 transition-colors cursor-pointer mx-auto"
+      >
+        Tags
+        <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {selectedTags.size > 0 && (
+        <div className="flex flex-wrap gap-0.5 mt-1 justify-center">
+          {allTags.filter(t => selectedTags.has(t)).map(tag => (
+            <span key={tag} className={`inline-flex items-center gap-0.5 px-1 py-[1px] rounded text-[7px] font-bold ${tagColorClass(tag)}`}>
+              {tag}
+              <button onClick={() => toggle(tag)} className="hover:text-indigo-900 cursor-pointer">
+                <X size={8} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {open && typeof document !== 'undefined' && createPortal(
+        <div ref={dropdownRef} style={dropdownStyle} className="w-48 bg-white border border-slate-200 rounded-lg shadow-xl z-[9999] max-h-60 overflow-y-auto">
+          {allTags.length === 0 ? (
+            <div className="p-3 text-[10px] text-slate-400 text-center">Nenhuma tag</div>
+          ) : (
+            allTags.map(tag => (
+              <label key={tag} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-[10px]">
+                <input
+                  type="checkbox"
+                  checked={selectedTags.has(tag)}
+                  onChange={() => toggle(tag)}
+                  className="accent-indigo-600"
+                />
+                <span className={`w-2 h-2 rounded-full ${tagColorClass(tag).split(' ').find(c => c.startsWith('bg-'))}`} />
+                <span className="text-slate-700">{tag}</span>
+              </label>
+            ))
+          )}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+};
+
+const TagEditor = ({
+  value,
+  allTags,
+  onUpdate,
+}: {
+  value: string | undefined;
+  allTags: string[];
+  onUpdate: (tags: string) => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const [newTag, setNewTag] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+
+  const tags = value ? value.split(';').map(t => t.trim()).filter(Boolean) : [];
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node) &&
+          dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  useEffect(() => {
+    if (open && ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setDropdownStyle({
+        position: 'fixed',
+        top: rect.bottom + 4,
+        left: rect.left,
+      });
+    }
+  }, [open]);
+
+  const toggle = (tag: string) => {
+    if (tags.includes(tag)) {
+      onUpdate(tags.filter(t => t !== tag).join(';'));
+    } else {
+      onUpdate([...tags, tag].join(';'));
+    }
+  };
+
+  const handleAddNew = () => {
+    const t = newTag.trim();
+    if (!t || tags.includes(t)) return;
+    onUpdate([...tags, t].join(';'));
+    setNewTag('');
+  };
+
+  const unselected = allTags.filter(t => !tags.includes(t));
+
+  return (
+    <div className="relative" ref={ref}>
+      <div className="flex flex-wrap gap-1 items-center">
+        {tags.map(tag => (
+          <span key={tag} className={`inline-flex items-center gap-0.5 px-1.5 py-[1px] rounded text-[8px] font-bold border ${tagColorClass(tag)}`}>
+            {tag}
+            <button onClick={() => toggle(tag)} className="hover:text-indigo-900 cursor-pointer">
+              <X size={8} />
+            </button>
+          </span>
+        ))}
+        <button
+          onClick={() => setOpen(!open)}
+          className="text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+          title="Adicionar tag"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" /><path d="M12 8v8" /><path d="M8 12h8" />
+          </svg>
+        </button>
+      </div>
+      {open && typeof document !== 'undefined' && createPortal(
+        <div ref={dropdownRef} style={dropdownStyle} className="w-52 bg-white border border-slate-200 rounded-lg shadow-xl z-[9999] max-h-60 overflow-y-auto p-2">
+          <div className="flex gap-1 mb-2">
+            <input
+              value={newTag}
+              onChange={e => setNewTag(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { handleAddNew(); } }}
+              placeholder="Nova tag..."
+              className="flex-1 px-2 py-1 border border-slate-200 rounded text-[10px] outline-none focus:border-indigo-400"
+            />
+            <button onClick={handleAddNew} className="px-2 py-1 bg-indigo-600 text-white rounded text-[9px] font-bold hover:bg-indigo-700 cursor-pointer">+</button>
+          </div>
+          {unselected.length > 0 ? (
+            unselected.map(tag => (
+              <label key={tag} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 cursor-pointer text-[10px] rounded">
+                <input
+                  type="checkbox"
+                  checked={false}
+                  onChange={() => toggle(tag)}
+                  className="accent-indigo-600"
+                />
+                <span className={`w-2 h-2 rounded-full ${tagColorClass(tag).split(' ').find(c => c.startsWith('bg-'))}`} />
+                <span className="text-slate-700">{tag}</span>
+              </label>
+            ))
+          ) : (
+            <div className="text-[10px] text-slate-400 text-center py-2">Todas as tags já adicionadas</div>
+          )}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
 };
 
 const App = () => {
   const [activities, setActivities] = useState<Activity[]>(initialActivities);
   const [assignees, setAssignees] = useState<string[]>([]);
   const [assignedToFilter, setAssignedToFilter] = useState('');
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [baseDate, setBaseDate] = useState(new Date(2026, 0, 1));
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -411,6 +642,16 @@ const App = () => {
       else next.add(parentId);
       return next;
     });
+  };
+
+  const updateActivityTags = (activityId: string | number, tags: string) => {
+    setActivities(prev => prev.map(act => act.id === activityId ? { ...act, tags } : act));
+    const allNewTags = tags.split(';').map(t => t.trim()).filter(Boolean);
+    setAllTags(prev => {
+      const updated = new Set([...prev, ...allNewTags]);
+      return Array.from(updated).sort();
+    });
+    setIsDirty(true);
   };
 
   // Store original CSV data for export mapping
@@ -444,10 +685,29 @@ const App = () => {
       result = activities.filter(act => matchedIds.has(act.id));
     }
 
-    // Filter out children of collapsed parents, then group and sort by actual date
-    const visible = result.filter(act => !act.parentId || !collapsedParents.has(act.parentId));
-    return sortAndGroupActivities(visible);
-  }, [activities, assignedToFilter, collapsedParents]);
+    if (selectedTags.size > 0) {
+      const matchedIds = new Set<string | number>();
+      activities.forEach(act => {
+        const actTags = act.tags ? act.tags.split(';').map(t => t.trim()) : [];
+        const hasTag = actTags.some(t => selectedTags.has(t));
+        if (hasTag) {
+          matchedIds.add(act.id);
+          if (act.parentId) matchedIds.add(act.parentId);
+        }
+      });
+      activities.forEach(act => {
+        if (act.isParent && matchedIds.has(act.id)) {
+          activities.filter(child => child.parentId === act.id).forEach(child => {
+            matchedIds.add(child.id);
+          });
+        }
+      });
+      result = result.filter(act => matchedIds.has(act.id));
+    }
+
+    // Filter out children of collapsed parents — preserve original sort order (from load)
+    return result.filter(act => !act.parentId || !collapsedParents.has(act.parentId));
+  }, [activities, assignedToFilter, collapsedParents, selectedTags]);
 
   const displayRows = useMemo(() => buildDisplayRows(filteredActivities), [filteredActivities]);
 
@@ -698,12 +958,13 @@ const App = () => {
     reader.onload = (event) => {
       const text = event.target?.result as string;
       const parsed = parseCSV(text);
-      const { mapped, minTime, assignees } = processCSVData(parsed.result);
+      const { mapped, minTime, assignees, tags } = processCSVData(parsed.result);
       
       if (mapped.length > 0) {
         setActivities(mapped);
         setBaseDate(new Date(minTime));
         setAssignees(assignees);
+        setAllTags(tags);
         setRawCsvData(parsed.result);
         setCsvHeaders(parsed.headers);
         setCsvSeparator(parsed.separator);
@@ -738,12 +999,13 @@ const App = () => {
           setCsvSeparator(','); // Default for Excel-derived JSON
 
           // Process raw objects from XLSX utils
-          const { mapped, minTime, assignees } = processCSVData(result.data);
+          const { mapped, minTime, assignees, tags } = processCSVData(result.data);
           
           if (mapped.length > 0) {
             setActivities(mapped);
             setBaseDate(new Date(minTime));
             setAssignees(assignees);
+            setAllTags(tags);
             setIsDirty(false);
             setUndoStack([]);
             setRedoStack([]);
@@ -807,11 +1069,12 @@ const App = () => {
            const actualEndDate = getDateFromDay(activity.actualStart + activity.actualDuration);
 
            return {
-             ...row,
-             'Start Date': formatToCSVDate(planStartDate),
-             'Target Date': formatToCSVDate(planEndDate),
-             'State Change Date': formatToCSVDate(actualEndDate)
-           };
+              ...row,
+              'Start Date': formatToCSVDate(planStartDate),
+              'Target Date': formatToCSVDate(planEndDate),
+              'State Change Date': formatToCSVDate(actualEndDate),
+              'Tags': activity.tags ?? ''
+            };
         }
         return row;
       });
@@ -850,7 +1113,7 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans">
-      <div className="max-w-[1600px] mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200">
+      <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200">
         
         {/* Header Section */}
         <div className="p-5 border-b border-slate-100 bg-white">
@@ -986,6 +1249,12 @@ const App = () => {
                 >
                   Cronograma
                 </th>
+                <th 
+                  className="sticky z-20 p-3 text-center font-bold uppercase tracking-wider text-slate-400 bg-white text-[10px]"
+                  style={{ left: activityWidth + 128, width: TAGS_WIDTH, minWidth: TAGS_WIDTH }}
+                >
+                  <TagMultiSelect allTags={allTags} selectedTags={selectedTags} setSelectedTags={setSelectedTags} />
+                </th>
                 
                 {/* Timeline Header */}
                 <th className="p-0 bg-white relative">
@@ -998,7 +1267,7 @@ const App = () => {
                           minWidth: `${month.days * DAY_WIDTH}px`, 
                           width: `${month.days * DAY_WIDTH}px`
                         }}
-                        className="h-8 flex items-center justify-center border-l border-slate-100 font-extrabold text-[9px] text-slate-600 bg-slate-50/50 uppercase tracking-widest"
+                        className={`h-8 flex items-center justify-center border-l border-slate-100 font-extrabold text-[9px] text-slate-600 bg-slate-50/50 uppercase tracking-widest ${idx === monthsHeader.length - 1 ? 'flex-1' : ''}`}
                       >
                         {month.label}
                       </div>
@@ -1006,7 +1275,7 @@ const App = () => {
                   </div>
                   {/* Sprint Row */}
                   <div className="flex border-b border-slate-100">
-                    {sprints.map(s => (
+                    {sprints.map((s, idx) => (
                       <div 
                         key={s.index}
                         style={{ 
@@ -1015,7 +1284,7 @@ const App = () => {
                         }}
                         className={`h-5 flex items-center justify-center border-l border-slate-200 font-extrabold text-[8px] tracking-widest ${
                           s.index % 2 === 0 ? 'bg-indigo-50/60 text-indigo-600' : 'bg-white text-slate-500'
-                        }`}
+                        } ${idx === sprints.length - 1 ? 'flex-1' : ''}`}
                       >
                         {s.label}
                       </div>
@@ -1023,11 +1292,11 @@ const App = () => {
                   </div>
                   {/* Days Row */}
                   <div className="flex">
-                    {daysData.map(p => (
+                    {daysData.map((p, idx) => (
                       <div 
                         key={p.num} 
                         style={{ minWidth: DAY_WIDTH, width: DAY_WIDTH }}
-                        className={`h-7 flex items-center justify-center border-l border-slate-50 font-bold text-[9px] transition-colors text-slate-400 hover:bg-slate-50`}
+                        className={`h-7 flex items-center justify-center border-l border-slate-50 font-bold text-[9px] transition-colors text-slate-400 hover:bg-slate-50 ${idx === daysData.length - 1 ? 'flex-1' : ''}`}
                       >
                         {p.label}
                       </div>
@@ -1056,6 +1325,9 @@ const App = () => {
                         {row.label}
                       </td>
                       <td className="sticky z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest pointer-events-none" style={{ left: activityWidth, width: 128, minWidth: 128 }}>
+                        {row.label}
+                      </td>
+                      <td className="sticky z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest pointer-events-none" style={{ left: activityWidth + 128, width: TAGS_WIDTH, minWidth: TAGS_WIDTH }}>
                         {row.label}
                       </td>
                       <td className="px-3 py-1.5" />
@@ -1113,13 +1385,16 @@ const App = () => {
                         {label}
                       </td>
                       <td className="sticky z-[15] bg-white p-3 text-center font-bold text-indigo-600 border-r border-slate-50 text-[10px] pointer-events-none" style={{ left: activityWidth, width: 128, minWidth: 128 }}>{getDateRangeStr(activity.planStart, activity.planDuration)}</td>
+                      <td className="sticky z-[15] bg-white p-3 border-r border-slate-50" style={{ left: activityWidth + 128, width: TAGS_WIDTH, minWidth: TAGS_WIDTH }}>
+                        <TagEditor value={activity.tags} allTags={allTags} onUpdate={(tags) => updateActivityTags(activity.id, tags)} />
+                      </td>
                       <td className="p-0 relative bg-white h-[60px]">
                         {/* Background Grid Lines */}
                         <div className="flex h-full absolute inset-0 pointer-events-none">
-                          {daysData.map(p => {
+                          {daysData.map((p, idx) => {
                             const isSprintStart = sprints.some(s => s.startDay === p.num);
                             return (
-                              <div key={p.num} style={{ minWidth: DAY_WIDTH, width: DAY_WIDTH }} className={`border-l ${isSprintStart ? 'border-indigo-300' : 'border-slate-50'} ${isSprintStart ? 'border-l-2' : ''}`} />
+                              <div key={p.num} style={{ minWidth: DAY_WIDTH, width: DAY_WIDTH }} className={`border-l ${isSprintStart ? 'border-indigo-300' : 'border-slate-50'} ${isSprintStart ? 'border-l-2' : ''} ${idx === daysData.length - 1 ? 'flex-1' : ''}`} />
                             );
                           })}
                         </div>
