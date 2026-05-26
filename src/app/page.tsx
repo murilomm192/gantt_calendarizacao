@@ -626,6 +626,103 @@ const TagEditor = ({
   );
 };
 
+const MonthMultiSelect = ({
+  availableMonths,
+  selectedMonths,
+  setSelectedMonths,
+}: {
+  availableMonths: string[];
+  selectedMonths: Set<string>;
+  setSelectedMonths: (fn: (prev: Set<string>) => Set<string>) => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node) &&
+          dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  useEffect(() => {
+    if (open && ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setDropdownStyle({
+        position: 'fixed',
+        top: rect.bottom + 4,
+        left: rect.left + rect.width / 2,
+        transform: 'translateX(-50%)',
+      });
+    }
+  }, [open]);
+
+  const toggle = (month: string) => {
+    setSelectedMonths(prev => {
+      const next = new Set(prev);
+      if (next.has(month)) next.delete(month);
+      else next.add(month);
+      return next;
+    });
+  };
+
+  const monthLabel = (key: string) => {
+    const [y, m] = key.split('-').map(Number);
+    const date = new Date(y!, m! - 1);
+    return date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600 transition-colors cursor-pointer mx-auto"
+      >
+        Períodos
+        <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {selectedMonths.size > 0 && (
+        <div className="flex flex-wrap gap-0.5 mt-1 justify-center">
+          {availableMonths.filter(m => selectedMonths.has(m)).map(m => (
+            <span key={m} className="inline-flex items-center gap-0.5 px-1 py-[1px] rounded text-[7px] font-bold bg-indigo-100 text-indigo-700 border border-indigo-200">
+              {monthLabel(m)}
+              <button onClick={() => toggle(m)} className="hover:text-indigo-900 cursor-pointer">
+                <X size={8} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {open && typeof document !== 'undefined' && createPortal(
+        <div ref={dropdownRef} style={dropdownStyle} className="w-52 bg-white border border-slate-200 rounded-lg shadow-xl z-[9999] max-h-60 overflow-y-auto">
+          {availableMonths.length === 0 ? (
+            <div className="p-3 text-[10px] text-slate-400 text-center">Nenhum período</div>
+          ) : (
+            availableMonths.map(m => (
+              <label key={m} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-[10px]">
+                <input
+                  type="checkbox"
+                  checked={selectedMonths.has(m)}
+                  onChange={() => toggle(m)}
+                  className="accent-indigo-600"
+                />
+                <span className="text-slate-700">{monthLabel(m)}</span>
+              </label>
+            ))
+          )}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+};
+
 const App = () => {
   const [activities, setActivities] = useState<Activity[]>(initialActivities);
   const [assignees, setAssignees] = useState<string[]>([]);
@@ -638,6 +735,7 @@ const App = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [collapsedParents, setCollapsedParents] = useState<Set<string | number>>(new Set());
   const [showActualBars, setShowActualBars] = useState(true);
+  const [selectedMonths, setSelectedMonths] = useState<Set<string>>(new Set());
 
   const [undoStack, setUndoStack] = useState<Activity[][]>([]);
   const [redoStack, setRedoStack] = useState<Activity[][]>([]);
@@ -771,8 +869,8 @@ const App = () => {
 
   const displayRows = useMemo(() => buildDisplayRows(filteredActivities), [filteredActivities]);
 
-  // Dynamically calculate period count based on the filtered activity list
-  const periodCount = useMemo(() => {
+  // Dynamically calculate full period count based on the filtered activity list
+  const fullPeriodCount = useMemo(() => {
     let maxEnd = 1;
     filteredActivities.forEach(act => {
       maxEnd = Math.max(maxEnd, act.planStart + act.planDuration, act.actualStart + act.actualDuration);
@@ -780,12 +878,33 @@ const App = () => {
     return maxEnd + 5; // Extra padding for visualization
   }, [filteredActivities]);
 
+  const visibleRange = useMemo(() => {
+    if (selectedMonths.size === 0) return { start: 0, end: fullPeriodCount };
+    let minDay = Infinity;
+    let maxDay = -Infinity;
+    for (const monthKey of selectedMonths) {
+      const [y, m] = monthKey.split('-').map(Number);
+      const firstOfMonth = new Date(y!, m! - 1, 1);
+      const lastOfMonth = new Date(y!, m!, 0);
+      const firstDay = Math.floor((firstOfMonth.getTime() - baseDate.getTime()) / ONE_DAY_MS);
+      const lastDay = Math.floor((lastOfMonth.getTime() - baseDate.getTime()) / ONE_DAY_MS);
+      if (firstDay < minDay) minDay = firstDay;
+      if (lastDay + 1 > maxDay) maxDay = lastDay + 1;
+    }
+    return {
+      start: Math.max(0, minDay),
+      end: Math.min(maxDay, fullPeriodCount),
+    };
+  }, [selectedMonths, baseDate, fullPeriodCount]);
+
+  const periodCount = useMemo(() => visibleRange.end - visibleRange.start, [visibleRange]);
+
   const todayOffset = useMemo(() => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
     const diff = now.getTime() - baseDate.getTime();
-    return Math.floor(diff / ONE_DAY_MS);
-  }, [baseDate]);
+    return Math.floor(diff / ONE_DAY_MS) - visibleRange.start;
+  }, [baseDate, visibleRange]);
 
   const isTodayVisible = todayOffset >= 0 && todayOffset < periodCount;
 
@@ -806,6 +925,21 @@ const App = () => {
     return `${String(date.getDate()).padStart(2, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}`;
   };
 
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    activities.forEach(act => {
+      const start = getDateFromDay(act.planStart);
+      set.add(`${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`);
+      const end = getDateFromDay(act.planStart + act.planDuration);
+      set.add(`${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}`);
+      if (act.actualDuration > 0) {
+        const aEnd = getDateFromDay(act.actualStart + act.actualDuration);
+        set.add(`${aEnd.getFullYear()}-${String(aEnd.getMonth() + 1).padStart(2, '0')}`);
+      }
+    });
+    return Array.from(set).sort();
+  }, [activities, getDateFromDay]);
+
   const getDateRangeStr = useMemo(() => (startDay: number, duration: number) => {
     const startDate = getDateFromDay(startDay);
     const endDate = getDateFromDay(startDay + duration - 1); // Shows up to the end of the final day
@@ -818,7 +952,7 @@ const App = () => {
     let currentStart = 0;
     let currentMonthDate: Date | null = null;
     
-    for (let i = 0; i < periodCount; i++) {
+    for (let i = visibleRange.start; i < visibleRange.end; i++) {
       const date = getDateFromDay(i);
       const monthKey = `${date.getMonth()}-${date.getFullYear()}`;
       
@@ -826,13 +960,13 @@ const App = () => {
         if (currentMonth !== null && currentMonthDate) {
           months.push({
             month: currentMonth,
-            start: currentStart,
-            days: i - currentStart,
+            start: currentStart - visibleRange.start,
+            days: (i - visibleRange.start) - currentStart,
             label: currentMonthDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
           });
         }
         currentMonth = monthKey;
-        currentStart = i;
+        currentStart = i - visibleRange.start;
         currentMonthDate = date;
       }
     }
@@ -841,17 +975,17 @@ const App = () => {
       months.push({
         month: currentMonth,
         start: currentStart,
-        days: periodCount - currentStart,
+        days: (visibleRange.end - visibleRange.start) - currentStart,
         label: currentMonthDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
       });
     }
     
     return months;
-  }, [getDateFromDay, periodCount]);
+  }, [getDateFromDay, visibleRange]);
 
   const daysData = useMemo(() => {
     return Array.from({ length: periodCount }, (_, i) => {
-      const dayNum = i;
+      const dayNum = visibleRange.start + i;
       const date = getDateFromDay(dayNum);
       return {
         num: dayNum,
@@ -859,10 +993,12 @@ const App = () => {
         label: String(date.getDate()).padStart(2, '0')
       };
     });
-  }, [getDateFromDay, periodCount]);
+  }, [getDateFromDay, periodCount, visibleRange]);
 
   const sprints = useMemo(() => {
     const sprintMap = new Map<string, { label: string; minStart: number; maxEnd: number }>();
+    const rangeStart = visibleRange.start;
+    const rangeEnd = visibleRange.end;
     for (const act of filteredActivities) {
       const name = act.sprintName;
       if (!name) continue;
@@ -873,10 +1009,19 @@ const App = () => {
       sprintMap.set(name, entry);
     }
     return Array.from(sprintMap.values())
-      .map(s => ({ label: s.label, startDay: s.minStart, endDay: Math.max(s.minStart + 1, s.maxEnd) }))
+      .map(s => {
+        const sStart = Math.max(s.minStart, rangeStart);
+        const sEnd = Math.min(Math.max(s.minStart + 1, s.maxEnd), rangeEnd);
+        return {
+          label: s.label,
+          startDay: sStart - rangeStart,
+          endDay: Math.max(sStart + 1, sEnd) - rangeStart,
+        };
+      })
+      .filter(s => s.startDay < s.endDay)
       .sort((a, b) => a.startDay - b.startDay)
       .map((s, idx) => ({ ...s, index: idx + 1 }));
-  }, [filteredActivities]);
+  }, [filteredActivities, visibleRange]);
 
   // Global mouse event listener for both Column Resize and Bar Dragging
   useEffect(() => {
@@ -1357,6 +1502,9 @@ const App = () => {
                   {iterationLevel4List.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
+              <div className="flex items-center gap-2 pr-4 border-r border-slate-200">
+                <MonthMultiSelect availableMonths={availableMonths} selectedMonths={selectedMonths} setSelectedMonths={setSelectedMonths} />
+              </div>
               <div className="flex flex-wrap gap-4 ml-auto">
                 <LegendItem colorClass="bg-indigo-200 border-indigo-300" label="Planejado" />
                 <LegendItem colorClass="bg-emerald-500 border-emerald-600" label="Progresso" />
@@ -1545,7 +1693,7 @@ const App = () => {
                         {/* Background Grid Lines */}
                         <div className="flex h-full absolute inset-0 pointer-events-none">
                           {daysData.map((p, idx) => {
-                            const isSprintStart = sprints.some(s => s.startDay === p.num);
+                            const isSprintStart = sprints.some(s => s.startDay === idx);
                             return (
                               <div key={p.num} style={{ minWidth: DAY_WIDTH, width: DAY_WIDTH }} className={`border-l ${isSprintStart ? 'border-indigo-300' : 'border-slate-50'} ${isSprintStart ? 'border-l-2' : ''} ${idx === daysData.length - 1 ? 'flex-1' : ''}`} />
                             );
@@ -1574,37 +1722,104 @@ const App = () => {
                         )}
                         
                         {/* Interactive Plan Bar (Top Half) */}
-                        <div 
-                          className="absolute h-[22px] bg-indigo-100 border border-indigo-200 rounded-lg shadow-sm flex items-center justify-center px-1.5 z-10 select-none group/bar top-[3px] cursor-grab hover:bg-indigo-200 hover:border-indigo-300 transition-colors active:cursor-grabbing"
-                          style={{
-                            left: `${activity.planStart * DAY_WIDTH}px`,
-                            width: `${activity.planDuration * DAY_WIDTH}px`
-                          }}
-                          onMouseDown={(e) => handleBarMouseDown(e, activity, 'plan', 'move', activity.planStart, activity.planDuration)}
-                        >
-                          <div 
-                            className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-400/30 rounded-l-lg opacity-0 group-hover/bar:opacity-100 transition-opacity"
-                            onMouseDown={(e) => handleBarMouseDown(e, activity, 'plan', 'resize-start', activity.planStart, activity.planDuration)}
-                          />
-                          <span className="text-[8px] text-indigo-800 font-bold truncate pointer-events-none tracking-tight">
-                            {getDateRangeStr(activity.planStart, activity.planDuration)}
-                          </span>
-                          <div 
-                            className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-400/30 rounded-r-lg opacity-0 group-hover/bar:opacity-100 transition-opacity"
-                            onMouseDown={(e) => handleBarMouseDown(e, activity, 'plan', 'resize-end', activity.planStart, activity.planDuration)}
-                          />
-                        </div>
+                        {(() => {
+                          const vStart = visibleRange.start;
+                          const vEnd = visibleRange.end;
+                          const rawStart = activity.planStart;
+                          const rawEnd = activity.planStart + activity.planDuration;
+
+                          let barLeft: number, barWidth: number;
+                          let leftClip = false, rightClip = false;
+
+                          if (rawEnd <= vStart) {
+                            barLeft = 0;
+                            barWidth = 1;
+                            rightClip = true;
+                          } else if (rawStart >= vEnd) {
+                            barLeft = periodCount - 1;
+                            barWidth = 1;
+                            leftClip = true;
+                          } else {
+                            const clampedStart = Math.max(rawStart, vStart);
+                            const clampedEnd = Math.min(rawEnd, vEnd);
+                            barLeft = clampedStart - vStart;
+                            barWidth = Math.max(1, clampedEnd - clampedStart);
+                            leftClip = rawStart < vStart;
+                            rightClip = rawEnd > vEnd;
+                          }
+
+                          return (
+                            <div 
+                              className={`absolute h-[22px] bg-indigo-100 border border-indigo-200 shadow-sm flex items-center px-1.5 z-10 select-none group/bar top-[3px] ${leftClip || rightClip ? 'cursor-default' : 'cursor-grab hover:bg-indigo-200 hover:border-indigo-300'} transition-colors active:cursor-grabbing ${barWidth <= 2 ? 'rounded-sm' : 'rounded-lg'}`}
+                              style={{
+                                left: `${barLeft * DAY_WIDTH}px`,
+                                width: `${barWidth * DAY_WIDTH}px`
+                              }}
+                              onMouseDown={(e) => {
+                                if (!leftClip && !rightClip) {
+                                  handleBarMouseDown(e, activity, 'plan', 'move', activity.planStart, activity.planDuration);
+                                }
+                              }}
+                            >
+                              {leftClip && (
+                                <div className="absolute -left-[1px] top-0 bottom-0 flex items-center text-indigo-400 text-[8px] font-bold pointer-events-none">▶</div>
+                              )}
+                              <div 
+                                className={`absolute left-0 top-0 bottom-0 w-2 hover:bg-indigo-400/30 rounded-l-lg opacity-0 group-hover/bar:opacity-100 transition-opacity ${leftClip || barWidth <= 2 ? 'hidden' : 'cursor-col-resize'}`}
+                                onMouseDown={(e) => { if (!leftClip) handleBarMouseDown(e, activity, 'plan', 'resize-start', activity.planStart, activity.planDuration); }}
+                              />
+                              <span className="text-[8px] text-indigo-800 font-bold truncate pointer-events-none tracking-tight w-full text-center">
+                                {getDateRangeStr(activity.planStart, activity.planDuration)}
+                              </span>
+                              <div 
+                                className={`absolute right-0 top-0 bottom-0 w-2 hover:bg-indigo-400/30 rounded-r-lg opacity-0 group-hover/bar:opacity-100 transition-opacity ${rightClip || barWidth <= 2 ? 'hidden' : 'cursor-col-resize'}`}
+                                onMouseDown={(e) => { if (!rightClip) handleBarMouseDown(e, activity, 'plan', 'resize-end', activity.planStart, activity.planDuration); }}
+                              />
+                              {rightClip && (
+                                <div className="absolute -right-[1px] top-0 bottom-0 flex items-center text-indigo-400 text-[8px] font-bold pointer-events-none">◀</div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {showActualBars && (
+                        (() => {
+                          const vStart = visibleRange.start;
+                          const vEnd = visibleRange.end;
+                          const rawStart = activity.actualStart;
+                          const rawDuration = activity.actualDuration;
+                          const rawEnd = rawStart + rawDuration;
+
+                          let barLeft: number, barWidth: number;
+                          let leftClip = false, rightClip = false;
+
+                          if (rawEnd <= vStart) {
+                            barLeft = 0;
+                            barWidth = 1;
+                            rightClip = true;
+                          } else if (rawStart >= vEnd) {
+                            barLeft = periodCount - 1;
+                            barWidth = 1;
+                            leftClip = true;
+                          } else {
+                            const clampedStart = Math.max(rawStart, vStart);
+                            const clampedEnd = Math.min(rawEnd, vEnd);
+                            barLeft = clampedStart - vStart;
+                            barWidth = Math.max(1, clampedEnd - clampedStart);
+                            leftClip = rawStart < vStart;
+                            rightClip = rawEnd > vEnd;
+                          }
+
+                          return (
                         <div 
                           className={`absolute bottom-[3px] h-[22px] rounded-lg cursor-grab shadow-md flex overflow-hidden z-10 select-none active:cursor-grabbing hover:shadow-lg transition-all group/actual ${
                             activity.isActualPlaceholder ? 'bg-slate-400 border border-slate-500' : ''
-                          }`}
+                          } ${leftClip || rightClip ? 'rounded-sm' : 'rounded-lg'}`}
                           style={{
-                            left: `${activity.actualStart * DAY_WIDTH}px`,
-                            width: `${activity.actualDuration * DAY_WIDTH}px`
+                            left: `${barLeft * DAY_WIDTH}px`,
+                            width: `${barWidth * DAY_WIDTH}px`
                           }}
-                          onMouseDown={(e) => handleBarMouseDown(e, activity, 'actual', 'move', activity.actualStart, activity.actualDuration)}
+                          onMouseDown={(e) => { if (!leftClip && !rightClip) handleBarMouseDown(e, activity, 'actual', 'move', activity.actualStart, activity.actualDuration); }}
                         >
                           {/* Inner structure for colors (Green vs Red) */}
                           <div className="flex w-full h-full pointer-events-none">
@@ -1618,19 +1833,27 @@ const App = () => {
 
                           {/* Overlay for text and handles */}
                           <div className="absolute inset-0 flex items-center justify-center px-2">
+                            {leftClip && (
+                              <div className="absolute -left-[1px] top-0 bottom-0 flex items-center text-white text-[8px] font-bold pointer-events-none drop-shadow-sm">▶</div>
+                            )}
                             <div 
-                              className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-black/10 pointer-events-auto opacity-0 group-hover/actual:opacity-100"
-                              onMouseDown={(e) => handleBarMouseDown(e, activity, 'actual', 'resize-start', activity.actualStart, activity.actualDuration)}
+                              className={`absolute left-0 top-0 bottom-0 w-2 hover:bg-black/10 pointer-events-auto transition-opacity ${leftClip || barWidth <= 2 ? 'hidden' : 'opacity-0 group-hover/actual:opacity-100 cursor-col-resize'}`}
+                              onMouseDown={(e) => { if (!leftClip) handleBarMouseDown(e, activity, 'actual', 'resize-start', activity.actualStart, activity.actualDuration); }}
                             />
                             <span className="text-[8px] text-white font-black drop-shadow-sm truncate pointer-events-none tracking-tight">
                               {getDateRangeStr(activity.actualStart, activity.actualDuration)}
                             </span>
                             <div 
-                              className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-black/10 pointer-events-auto opacity-0 group-hover/actual:opacity-100"
-                              onMouseDown={(e) => handleBarMouseDown(e, activity, 'actual', 'resize-end', activity.actualStart, activity.actualDuration)}
+                              className={`absolute right-0 top-0 bottom-0 w-2 hover:bg-black/10 pointer-events-auto transition-opacity ${rightClip || barWidth <= 2 ? 'hidden' : 'opacity-0 group-hover/actual:opacity-100 cursor-col-resize'}`}
+                              onMouseDown={(e) => { if (!rightClip) handleBarMouseDown(e, activity, 'actual', 'resize-end', activity.actualStart, activity.actualDuration); }}
                             />
+                            {rightClip && (
+                              <div className="absolute -right-[1px] top-0 bottom-0 flex items-center text-white text-[8px] font-bold pointer-events-none drop-shadow-sm">◀</div>
+                            )}
                           </div>
                         </div>
+                          );
+                        })()
                         )}
                       </td>
                     </tr>
