@@ -180,6 +180,13 @@ const extractSprintName = (row: Record<string, string | number | null | undefine
   return segments[segments.length - 1];
 };
 
+const extractSquadName = (row: Record<string, string | number | null | undefined>): string | undefined => {
+  const path = String(row['Iteration Path'] ?? '').trim();
+  if (!path) return undefined;
+  const segments = path.split('\\');
+  return segments[3];
+};
+
 const rowHasStartDate = (row: Record<string, string | number | null | undefined>) => {
   const start = row['Start Date'] ?? row['Start Date '];
   return start != null && String(start).trim() !== '';
@@ -271,7 +278,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           workItemType,
           parentKind,
           sprintName: extractSprintName(row),
-          iterationLevel4: (row['Iteration Level 4'] as string) || undefined,
+          iterationLevel4: extractSquadName(row),
           tags: extractTags(row),
           effortTotal: 0,
           childrenCount: 0,
@@ -292,7 +299,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           workItemType,
           parentKind,
           sprintName: extractSprintName(row),
-          iterationLevel4: (row['Iteration Level 4'] as string) || undefined,
+          iterationLevel4: extractSquadName(row),
           tags: extractTags(row),
           effortTotal: 0,
           childrenCount: 0,
@@ -324,7 +331,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
         workItemType,
         parentKind: currentParent?.parentKind ?? 'Épico',
         sprintName: extractSprintName(row),
-        iterationLevel4: (row['Iteration Level 4'] as string) || undefined,
+        iterationLevel4: extractSquadName(row),
         tags: extractTags(row),
         effortPoints: effort,
         parentId: currentParent?.id,
