@@ -29,6 +29,7 @@ interface Activity {
   parentKind?: 'Épico' | 'Demanda';
   isDateLocked?: boolean;
   sprintName?: string;
+  iterationLevel4?: string;
   tags?: string;
 }
 
@@ -270,6 +271,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           workItemType,
           parentKind,
           sprintName: extractSprintName(row),
+          iterationLevel4: (row['Iteration Level 4'] as string) || undefined,
           tags: extractTags(row),
           effortTotal: 0,
           childrenCount: 0,
@@ -290,6 +292,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           workItemType,
           parentKind,
           sprintName: extractSprintName(row),
+          iterationLevel4: (row['Iteration Level 4'] as string) || undefined,
           tags: extractTags(row),
           effortTotal: 0,
           childrenCount: 0,
@@ -321,6 +324,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
         workItemType,
         parentKind: currentParent?.parentKind ?? 'Épico',
         sprintName: extractSprintName(row),
+        iterationLevel4: (row['Iteration Level 4'] as string) || undefined,
         tags: extractTags(row),
         effortPoints: effort,
         parentId: currentParent?.id,
@@ -619,6 +623,7 @@ const App = () => {
   const [activities, setActivities] = useState<Activity[]>(initialActivities);
   const [assignees, setAssignees] = useState<string[]>([]);
   const [assignedToFilter, setAssignedToFilter] = useState('');
+  const [iterationLevel4Filter, setIterationLevel4Filter] = useState('');
   const [allTags, setAllTags] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [baseDate, setBaseDate] = useState(new Date(2026, 0, 1));
@@ -660,6 +665,35 @@ const App = () => {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvSeparator, setCsvSeparator] = useState(',');
 
+  const iterationLevel4List = useMemo(() => {
+    const set = new Set<string>();
+    activities.forEach(act => { if (act.iterationLevel4) set.add(act.iterationLevel4); });
+    return Array.from(set).sort();
+  }, [activities]);
+
+  const filteredAssignees = useMemo(() => {
+    if (!iterationLevel4Filter) return assignees;
+    const squadActivityIds = new Set<string | number>();
+    activities.forEach(act => {
+      if (act.iterationLevel4 === iterationLevel4Filter) {
+        squadActivityIds.add(act.id);
+        if (act.isParent) {
+          activities.filter(c => c.parentId === act.id).forEach(c => squadActivityIds.add(c.id));
+        }
+      }
+    });
+    return assignees.filter(a =>
+      activities.some(act => squadActivityIds.has(act.id) && act.assignedTo === a)
+    );
+  }, [activities, assignees, iterationLevel4Filter]);
+
+  // Reset assignee filter if current selection is no longer in the filtered list
+  useEffect(() => {
+    if (assignedToFilter && !filteredAssignees.includes(assignedToFilter)) {
+      setAssignedToFilter('');
+    }
+  }, [assignedToFilter, filteredAssignees]);
+
   const filteredActivities = useMemo(() => {
     let result = activities;
     
@@ -686,6 +720,24 @@ const App = () => {
       result = activities.filter(act => matchedIds.has(act.id));
     }
 
+    if (iterationLevel4Filter) {
+      const matchedIds = new Set<string | number>();
+      activities.forEach(act => {
+        if (act.iterationLevel4 === iterationLevel4Filter) {
+          matchedIds.add(act.id);
+          if (act.parentId) matchedIds.add(act.parentId);
+        }
+      });
+      activities.forEach(act => {
+        if (act.isParent && matchedIds.has(act.id)) {
+          activities.filter(child => child.parentId === act.id).forEach(child => {
+            matchedIds.add(child.id);
+          });
+        }
+      });
+      result = result.filter(act => matchedIds.has(act.id));
+    }
+
     if (selectedTags.size > 0) {
       const matchedIds = new Set<string | number>();
       activities.forEach(act => {
@@ -708,7 +760,7 @@ const App = () => {
 
     // Filter out children of collapsed parents — preserve original sort order (from load)
     return result.filter(act => !act.parentId || !collapsedParents.has(act.parentId));
-  }, [activities, assignedToFilter, collapsedParents, selectedTags]);
+  }, [activities, assignedToFilter, iterationLevel4Filter, collapsedParents, selectedTags]);
 
   const displayRows = useMemo(() => buildDisplayRows(filteredActivities), [filteredActivities]);
 
@@ -1284,7 +1336,18 @@ const App = () => {
                   onChange={(e) => setAssignedToFilter(e.target.value)}
                 >
                   <option value="">Todos os Responsáveis</option>
-                  {assignees.map(a => <option key={a} value={a}>{a}</option>)}
+                  {filteredAssignees.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2 pr-4 border-r border-slate-200">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Squad:</span>
+                <select 
+                  className="px-2 py-1 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all min-w-[140px]"
+                  value={iterationLevel4Filter}
+                  onChange={(e) => setIterationLevel4Filter(e.target.value)}
+                >
+                  <option value="">Todos os Squads</option>
+                  {iterationLevel4List.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div className="flex flex-wrap gap-4 ml-auto">
@@ -1444,11 +1507,17 @@ const App = () => {
                         <div className="flex gap-1.5 pl-[20px]">
                           <span className="text-[8px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold border border-indigo-100">{activity.childrenCount} itens</span>
                           <span className="text-[8px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortTotal} pts</span>
+                          {activity.iterationLevel4 && (
+                            <span className="text-[8px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-full font-bold border border-amber-200">{activity.iterationLevel4}</span>
+                          )}
                         </div>
                       )}
                       {activity.isChild && (
                         <div className="flex gap-1.5 pl-[20px]">
                           <span className="text-[8px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortPoints} pts</span>
+                          {activity.iterationLevel4 && (
+                            <span className="text-[8px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-full font-bold border border-amber-200">{activity.iterationLevel4}</span>
+                          )}
                         </div>
                       )}
                    </div>
