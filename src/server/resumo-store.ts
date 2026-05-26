@@ -45,7 +45,7 @@ function getMonthKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function normalizeWorkItemType(row: Record<string, any>): string {
+function normalizeWorkItemType(row: Record<string, string | number | null | undefined>): string {
   return String(row['Work Item Type'] ?? row['Work Item Type '] ?? '').trim();
 }
 
@@ -55,12 +55,12 @@ function formatDateRange(start: Date, end: Date): string {
   return `${fmt(start)} - ${fmt(end)}`;
 }
 
-function findMinDate(rows: Record<string, any>[]): Date {
+function findMinDate(rows: Record<string, string | number | null | undefined>[]): Date {
   const dateFields = ['Start Date', 'Target Date', 'Activated Date', 'State Change Date'];
   let minTime = Infinity;
   for (const row of rows) {
     for (const field of dateFields) {
-      const d = parseDate(row[field]);
+      const d = parseDate(row[field] as string | null | undefined);
       if (d && d.getTime() < minTime) minTime = d.getTime();
     }
   }
@@ -77,8 +77,8 @@ export function getResumoData(): ResumoData {
   const mesMap = new Map<string, { planejado: number; realizado: number }>();
 
   for (const ep of epistobs) {
-    const startDate = parseDate(ep['Start Date']);
-    const activatedDate = parseDate(ep['Activated Date']);
+    const startDate = parseDate(ep['Start Date'] as string | null | undefined);
+    const activatedDate = parseDate(ep['Activated Date'] as string | null | undefined);
 
     if (startDate) {
       const key = getMonthKey(startDate);
@@ -104,7 +104,7 @@ export function getResumoData(): ResumoData {
 
   const tagMap = new Map<string, number>();
   for (const ep of epistobs) {
-    const tagsRaw = String(ep['Tags'] ?? '').trim();
+    const tagsRaw = String(ep.Tags ?? '').trim();
     if (!tagsRaw) continue;
     const tags = tagsRaw.split(';').map(t => t.trim()).filter(t => t.startsWith('LE:'));
     for (const tag of tags) {
@@ -120,7 +120,7 @@ export function getResumoData(): ResumoData {
   let pontosDemandas = 0;
   for (const d of demandas) {
     totalDemandas++;
-    pontosDemandas += parseInt(d['Effort'] as string) || 0;
+    pontosDemandas += parseInt(d.Effort as string) || 0;
   }
 
   const minDate = findMinDate(rows);
@@ -128,10 +128,10 @@ export function getResumoData(): ResumoData {
   const sprintMap = new Map<string, number>();
 
   for (const row of rows) {
-    const effort = parseInt(row['Effort'] as string) || 0;
+    const effort = parseInt(row.Effort as string) || 0;
     if (effort === 0) continue;
 
-    const startDate = parseDate(row['Start Date']);
+    const startDate = parseDate(row['Start Date'] as string | null | undefined);
     if (!startDate) continue;
 
     const diffMs = startDate.getTime() - minDate.getTime();

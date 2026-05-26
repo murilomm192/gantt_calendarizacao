@@ -25,7 +25,7 @@ function formatDate(date: Date) {
   return `${d}/${m}/${y} 00:00:00`;
 }
 
-function parseFile(): Record<string, any>[] {
+function parseFile(): Record<string, string | number | null | undefined>[] {
   const filePath = path.resolve(process.cwd(), 'query_devops.xlsx');
   
   if (!fs.existsSync(filePath)) {
@@ -42,7 +42,7 @@ function parseFile(): Record<string, any>[] {
     if (!worksheet) return [];
 
     // Get raw data as array of arrays to find header row
-    const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+    const rawData = XLSX.utils.sheet_to_json<(string | number | null | undefined)[]>(worksheet, { header: 1 });
     
     // Find the row that contains 'ID' and 'Work Item Type'
     let headerRowIndex = -1;
@@ -63,7 +63,7 @@ function parseFile(): Record<string, any>[] {
     const dataRows = rawData.slice(headerRowIndex + 1);
 
     return dataRows.map(row => {
-      const obj: Record<string, any> = {};
+      const obj: Record<string, string | number | null | undefined> = {};
       headers.forEach((header, index) => {
         let value = row[index];
         
@@ -75,14 +75,14 @@ function parseFile(): Record<string, any>[] {
         obj[header] = value;
       });
       return obj;
-    }).filter(row => row.ID || row.Title);
+    }).filter(row => Boolean(row.ID) || Boolean(row.Title));
   } catch (error) {
     console.error('Error reading excel file:', error);
     return [];
   }
 }
 
-export function getExcelData(): Record<string, any>[] {
+export function getExcelData(): Record<string, string | number | null | undefined>[] {
   // Always load from the Excel file as requested
   return parseFile();
 }

@@ -8,14 +8,14 @@ export async function GET() {
   try {
     const data = getExcelData();
     return NextResponse.json({ success: true, data });
-  } catch (_error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to read data' }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const { data } = (await request.json()) as { data: Record<string, any>[] };
+    const { data } = (await request.json()) as { data: Record<string, unknown>[] };
 
     if (!data || !Array.isArray(data)) {
       return NextResponse.json({ error: 'Invalid data format' }, { status: 400 });
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Planejamento');
 
     // Generate buffer
-    const buf = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const buf = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 
     // Save to a new file
     const fileName = `planejamento_exportado_${new Date().getTime()}.xlsx`;

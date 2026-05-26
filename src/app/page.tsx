@@ -229,7 +229,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
   let currentParent: Activity | null = null;
 
   const extractTags = (row: Record<string, string | number | null | undefined>): string | undefined => {
-    const raw = String(row['Tags'] ?? '').trim();
+    const raw = String(row.Tags ?? '').trim();
     if (!raw) return undefined;
     const tags = raw.split(';').map(t => t.trim()).filter(Boolean);
     tags.forEach(t => allTags.add(t));
@@ -1195,7 +1195,7 @@ const App = () => {
           return;
         }
 
-        const headerRow = rawData[headerRowIndex] as (string | number | null | undefined)[];
+        const headerRow = rawData[headerRowIndex]!;
         const excelHeaders = headerRow.map(h => String(h ?? ''));
         const dataRows = rawData.slice(headerRowIndex + 1);
 
@@ -1213,7 +1213,7 @@ const App = () => {
           .map(row => {
             const obj: Record<string, string | number | null | undefined> = {};
             excelHeaders.forEach((header, index) => {
-              let value = row[index] as string | number | null | undefined;
+              let value = row[index];
               if (typeof value === 'number' && (header.includes('Date') || header === 'Start Date' || header === 'Target Date')) {
                 value = formatExcelDate(value);
               }
@@ -1221,7 +1221,7 @@ const App = () => {
             });
             return obj;
           })
-          .filter(row => row.ID || row.Title);
+          .filter(row => Boolean(row.ID) || Boolean(row.Title));
 
         data = rows;
         headers = excelHeaders;
@@ -1341,7 +1341,7 @@ const App = () => {
     } else {
       // Export original structure with adjusted dates
       exportData = rawCsvData.map((row, index) => {
-        const activityId = (row.ID as string | number) ?? index + 1;
+        const activityId = row.ID ?? index + 1;
         const activity = activities.find(a => a.id === activityId);
         
         if (activity) {
