@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom';
 import { Calendar, Info, Target, Upload, Save, RefreshCw, AlertCircle, ChevronRight, ChevronDown, Undo2, Redo2, X } from 'lucide-react';
 import { useToast } from '~/app/toast';
+import * as XLSX from 'xlsx';
 
 interface Activity {
   id: string | number;
@@ -954,20 +955,91 @@ const App = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const isXlsx = file.name.endsWith('.xlsx');
+
     const reader = new FileReader();
     reader.onload = (event) => {
-      const text = event.target?.result as string;
-      const parsed = parseCSV(text);
-      const { mapped, minTime, assignees, tags } = processCSVData(parsed.result);
+      let data: Record<string, string | number | null | undefined>[];
+      let headers: string[];
+      let separator: string;
+
+      if (isXlsx) {
+        const arrayBuf = event.target?.result as ArrayBuffer;
+        const workbook = XLSX.read(arrayBuf, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) {
+          toast('Nenhuma planilha encontrada no arquivo.', 'error');
+          return;
+        }
+        const sheet = workbook.Sheets[sheetName]!;
+
+        // Read as raw array of arrays to locate the real header row
+        const rawData = XLSX.utils.sheet_to_json<(string | number | null | undefined)[]>(sheet, { header: 1 });
+
+        // Find the row that contains 'ID' and 'Work Item Type'
+        let headerRowIndex = -1;
+        for (let i = 0; i < rawData.length; i++) {
+          const row = rawData[i];
+          if (row?.includes('ID') && row?.includes('Work Item Type')) {
+            headerRowIndex = i;
+            break;
+          }
+        }
+
+        if (headerRowIndex === -1) {
+          toast("Formato de arquivo inválido. O arquivo deve conter as colunas 'ID' e 'Work Item Type'.", 'error');
+          return;
+        }
+
+        const headerRow = rawData[headerRowIndex] as (string | number | null | undefined)[];
+        const excelHeaders = headerRow.map(h => String(h ?? ''));
+        const dataRows = rawData.slice(headerRowIndex + 1);
+
+        const formatExcelDate = (serial: number): string => {
+          const utcDays = Math.floor(serial - 25569);
+          const utcValue = utcDays * 86400;
+          const dateInfo = new Date(utcValue * 1000);
+          const d = String(dateInfo.getDate()).padStart(2, '0');
+          const m = String(dateInfo.getMonth() + 1).padStart(2, '0');
+          const y = dateInfo.getFullYear();
+          return `${d}/${m}/${y} 00:00:00`;
+        };
+
+        const rows = dataRows
+          .map(row => {
+            const obj: Record<string, string | number | null | undefined> = {};
+            excelHeaders.forEach((header, index) => {
+              let value = row[index] as string | number | null | undefined;
+              if (typeof value === 'number' && (header.includes('Date') || header === 'Start Date' || header === 'Target Date')) {
+                value = formatExcelDate(value);
+              }
+              obj[header] = value;
+            });
+            return obj;
+          })
+          .filter(row => row.ID || row.Title);
+
+        data = rows;
+        headers = excelHeaders;
+        separator = ',';
+      } else {
+        const text = event.target?.result as string;
+        const parsed = parseCSV(text);
+        data = parsed.result;
+        headers = parsed.headers;
+        separator = parsed.separator;
+      }
+
+      const { mapped, minTime, assignees, tags } = processCSVData(data);
       
       if (mapped.length > 0) {
         setActivities(mapped);
         setBaseDate(new Date(minTime));
         setAssignees(assignees);
         setAllTags(tags);
-        setRawCsvData(parsed.result);
-        setCsvHeaders(parsed.headers);
-        setCsvSeparator(parsed.separator);
+        setRawCsvData(data);
+        setCsvHeaders(headers);
+        setCsvSeparator(separator);
         setIsDirty(false);
         setUndoStack([]);
         setRedoStack([]);
@@ -976,10 +1048,15 @@ const App = () => {
         const parentIds = mapped.filter(a => a.isParent).map(a => a.id);
         setCollapsedParents(new Set(parentIds));
       } else {
-        toast("Nenhum dado válido encontrado. O CSV deve conter as colunas 'Title' e 'Start Date'.", 'error');
+        toast("Nenhum dado válido encontrado. O arquivo deve conter as colunas 'Title' e 'Start Date'.", 'error');
       }
     };
-    reader.readAsText(file);
+
+    if (isXlsx) {
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.readAsText(file);
+    }
     e.target.value = ''; // reset to allow re-upload of the same file
   };
 
@@ -1191,8 +1268,8 @@ const App = () => {
                <div className="flex items-center gap-2">
                  <label className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-900 cursor-pointer transition-all text-xs font-bold shadow-sm active:scale-95">
                     <Upload size={14} />
-                    <span>Importar CSV</span>
-                    <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                    <span>Importar</span>
+                    <input type="file" accept=".csv,.xlsx" className="hidden" onChange={handleFileUpload} />
                   </label>
                </div>
             </div>
