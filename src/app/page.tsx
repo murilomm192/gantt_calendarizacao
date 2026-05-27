@@ -187,19 +187,12 @@ const extractSquadName = (row: Record<string, string | number | null | undefined
   return segments[3];
 };
 
-const rowHasStartDate = (row: Record<string, string | number | null | undefined>) => {
-  const start = row['Start Date'] ?? row['Start Date '];
-  return start != null && String(start).trim() !== '';
-};
-
 const processCSVData = (data: Record<string, string | number | null | undefined>[]) => {
   let minTime = Infinity;
-  // Parents (Épico/Demanda) may have no Start Date in ADO exports; children still need them
   const validRows = data.filter((r) => {
     const type = normalizeWorkItemType(r);
     if (!type && !r.Title) return false;
-    if (isParentWorkItemType(type)) return true;
-    return rowHasStartDate(r);
+    return true;
   });
 
   const dateFields = ['Start Date', 'Target Date', 'Activated Date', 'State Change Date'] as const;
@@ -375,6 +368,13 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
         }
       }
     }
+  }
+
+  // Recalculate childrenCount and effortTotal from actual parent-child matching
+  for (const parent of activities.filter((a) => a.isParent)) {
+    const children = activities.filter((c) => c.parentId === parent.id);
+    parent.childrenCount = children.length;
+    parent.effortTotal = children.reduce((sum, c) => sum + (c.effortPoints ?? 0), 0);
   }
 
   // Épicos without plan dates: derive plan span from children's Start/Target
