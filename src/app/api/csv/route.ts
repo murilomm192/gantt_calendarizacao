@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
 import { getExcelData } from '~/server/excel-store';
-import fs from 'fs';
-import path from 'path';
 import * as XLSX from 'xlsx';
 
 export async function GET() {
@@ -27,14 +25,18 @@ export async function POST(request: Request) {
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Planejamento');
 
     // Generate buffer
-    const buf = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    const buf = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as BodyInit;
 
-    // Save to a new file
+    // Return the XLSX as a download response
     const fileName = `planejamento_exportado_${new Date().getTime()}.xlsx`;
-    const filePath = path.join(process.cwd(), fileName);
-    fs.writeFileSync(filePath, buf);
 
-    return NextResponse.json({ success: true, fileName });
+    return new NextResponse(buf, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${fileName}"`,
+      },
+    });
   } catch (error) {
     console.error('Error saving excel file:', error);
     return NextResponse.json({ error: 'Failed to save data' }, { status: 500 });

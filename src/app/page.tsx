@@ -1361,25 +1361,31 @@ const App = () => {
       });
     }
 
-    // Save to server filesystem as XLSX via API
+    // Generate XLSX client-side and trigger browser download dialog
     try {
-      const response = await fetch('/api/csv', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: exportData })
-      });
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Planejamento');
 
-      if (response.ok) {
-        const result = await response.json() as { success: boolean; fileName: string };
-        toast(`Arquivo salvo: ${result.fileName}`, 'success');
-        setUndoStack([]);
-        setRedoStack([]);
-        setIsDirty(false);
-      } else {
-        throw new Error('Falha ao salvar');
-      }
+      const buf = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as BlobPart;
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+      const fileName = `planejamento_exportado_${Date.now()}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast(`Arquivo baixado: ${fileName}`, 'success');
+      setUndoStack([]);
+      setRedoStack([]);
+      setIsDirty(false);
     } catch (_error) {
-      toast('Erro ao salvar arquivo XLSX', 'error');
+      toast('Erro ao gerar arquivo XLSX', 'error');
     } finally {
       setIsSaving(false);
     }
