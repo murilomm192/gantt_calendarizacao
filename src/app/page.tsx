@@ -1,12 +1,33 @@
-'use client'
+"use client";
 
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { Calendar, Info, Target, Upload, Save, RefreshCw, AlertCircle, ChevronRight, ChevronDown, Undo2, Redo2, X } from 'lucide-react';
-import { useToast } from '~/app/toast';
-import * as XLSX from 'xlsx';
+import React, {
+  useState,
+  useMemo,
+  useEffect,
+  useRef,
+  useCallback,
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  Calendar,
+  Info,
+  Target,
+  Upload,
+  Save,
+  RefreshCw,
+  AlertCircle,
+  ChevronRight,
+  ChevronDown,
+  Undo2,
+  Redo2,
+  X,
+  BarChart3,
+} from "lucide-react";
+import { useToast } from "~/app/toast";
+import SprintResumoModal from "~/app/sprint-resumo-modal";
+import * as XLSX from "xlsx";
 
-interface Activity {
+export interface Activity {
   id: string | number;
   name: string;
   planStart: number;
@@ -24,20 +45,20 @@ interface Activity {
   childrenCount?: number;
   effortTotal?: number;
   actualStartDateMs?: number; // Internal for parent calculation
-  actualEndDateMs?: number;   // Internal for parent calculation
+  actualEndDateMs?: number; // Internal for parent calculation
   workItemType?: string;
-  parentKind?: 'Épico' | 'Demanda';
+  parentKind?: "Épico" | "Demanda";
   isDateLocked?: boolean;
   sprintName?: string;
   iterationLevel4?: string;
   tags?: string;
 }
 
-type ParentKind = 'Épico' | 'Demanda';
+type ParentKind = "Épico" | "Demanda";
 
 type DisplayRow =
-  | { type: 'section'; label: string; kind: ParentKind }
-  | { type: 'activity'; activity: Activity };
+  | { type: "section"; label: string; kind: ParentKind }
+  | { type: "activity"; activity: Activity };
 
 const compareByPlanDate = (a: Activity, b: Activity) => {
   const startDiff = a.planStart - b.planStart;
@@ -45,7 +66,7 @@ const compareByPlanDate = (a: Activity, b: Activity) => {
   const endA = a.planStart + a.planDuration;
   const endB = b.planStart + b.planDuration;
   if (endA !== endB) return endA - endB;
-  return String(a.name).localeCompare(String(b.name), 'pt-BR');
+  return String(a.name).localeCompare(String(b.name), "pt-BR");
 };
 
 const sortAndGroupActivities = (activities: Activity[]): Activity[] => {
@@ -57,24 +78,32 @@ const sortAndGroupActivities = (activities: Activity[]): Activity[] => {
     childrenByParent.set(act.parentId, list);
   }
 
-  const parents = activities.filter(a => a.isParent);
-  const epicParents = parents.filter(p => p.workItemType !== 'Demanda').sort(compareByPlanDate);
-  const demandaParents = parents.filter(p => p.workItemType === 'Demanda').sort(compareByPlanDate);
+  const parents = activities.filter((a) => a.isParent);
+  const epicParents = parents
+    .filter((p) => p.workItemType !== "Demanda")
+    .sort(compareByPlanDate);
+  const demandaParents = parents
+    .filter((p) => p.workItemType === "Demanda")
+    .sort(compareByPlanDate);
 
   const ordered: Activity[] = [];
   for (const parent of [...epicParents, ...demandaParents]) {
     ordered.push(parent);
-    const children = (childrenByParent.get(parent.id) ?? []).sort(compareByPlanDate);
+    const children = (childrenByParent.get(parent.id) ?? []).sort(
+      compareByPlanDate,
+    );
     ordered.push(...children);
   }
 
-  const groupedIds = new Set(ordered.map(a => a.id));
-  const orphans = activities.filter(a => !groupedIds.has(a.id));
+  const groupedIds = new Set(ordered.map((a) => a.id));
+  const orphans = activities.filter((a) => !groupedIds.has(a.id));
   return [...ordered, ...orphans];
 };
 
 const getParentKind = (activity: Activity): ParentKind =>
-  activity.workItemType === 'Demanda' || activity.parentKind === 'Demanda' ? 'Demanda' : 'Épico';
+  activity.workItemType === "Demanda" || activity.parentKind === "Demanda"
+    ? "Demanda"
+    : "Épico";
 
 const buildDisplayRows = (activities: Activity[]): DisplayRow[] => {
   const rows: DisplayRow[] = [];
@@ -85,14 +114,14 @@ const buildDisplayRows = (activities: Activity[]): DisplayRow[] => {
       const section = getParentKind(activity);
       if (section !== lastSection) {
         rows.push({
-          type: 'section',
-          label: section === 'Demanda' ? 'Demandas' : 'Épicos',
+          type: "section",
+          label: section === "Demanda" ? "Demandas" : "Épicos",
           kind: section,
         });
         lastSection = section;
       }
     }
-    rows.push({ type: 'activity', activity });
+    rows.push({ type: "activity", activity });
   }
 
   return rows;
@@ -100,8 +129,8 @@ const buildDisplayRows = (activities: Activity[]): DisplayRow[] => {
 
 interface DragState {
   id: string | number;
-  type: 'plan' | 'actual';
-  action: 'move' | 'resize-start' | 'resize-end';
+  type: "plan" | "actual";
+  action: "move" | "resize-start" | "resize-end";
   startX: number;
   originalStart: number;
   originalDuration: number;
@@ -117,77 +146,92 @@ const ONE_DAY_MS = 1000 * 60 * 60 * 24;
 // --- CSV Parsing Utility ---
 const parseDate = (dateStr: string | null | undefined): Date | null => {
   if (!dateStr) return null;
-  const [datePart] = dateStr.split(' ');
+  const [datePart] = dateStr.split(" ");
   if (!datePart) return null;
-  const parts = datePart.split('/');
+  const parts = datePart.split("/");
   if (parts.length !== 3) return null;
-  const d = parseInt(parts[0] ?? '0');
-  const m = parseInt(parts[1] ?? '0');
-  const y = parseInt(parts[2] ?? '0');
+  const d = parseInt(parts[0] ?? "0");
+  const m = parseInt(parts[1] ?? "0");
+  const y = parseInt(parts[2] ?? "0");
   const date = new Date(y, m - 1, d);
   return isNaN(date.getTime()) ? null : date;
 };
 
 const parseCSV = (text: string) => {
-  const lines = text.split('\n').filter(l => l.trim());
-  if (lines.length === 0) return { headers: [] as string[], result: [] as Record<string, string>[], separator: ',' };
-  
+  const lines = text.split("\n").filter((l) => l.trim());
+  if (lines.length === 0)
+    return {
+      headers: [] as string[],
+      result: [] as Record<string, string>[],
+      separator: ",",
+    };
+
   // Detect separator based on frequency in the first line
-  const firstLine = lines[0] ?? '';
+  const firstLine = lines[0] ?? "";
   const commaCount = (firstLine.match(/,/g) ?? []).length;
   const semiCount = (firstLine.match(/;/g) ?? []).length;
-  const separator = semiCount > commaCount ? ';' : ',';
-  
-  const headers = (lines[0] ?? '').split(separator).map(h => h.replace(/["\r]/g, '').trim());
+  const separator = semiCount > commaCount ? ";" : ",";
+
+  const headers = (lines[0] ?? "")
+    .split(separator)
+    .map((h) => h.replace(/["\r]/g, "").trim());
   const result: Record<string, string>[] = [];
-  
+
   for (let i = 1; i < lines.length; i++) {
-    const line = lines[i] ?? '';
+    const line = lines[i] ?? "";
     const values: string[] = [];
     let inQuotes = false;
-    let currentValue = '';
-    
+    let currentValue = "";
+
     for (const char of line) {
       if (char === '"') {
         inQuotes = !inQuotes;
       } else if (char === separator && !inQuotes) {
-        values.push(currentValue.replace(/\r/g, '').trim());
-        currentValue = '';
+        values.push(currentValue.replace(/\r/g, "").trim());
+        currentValue = "";
       } else {
         currentValue += char;
       }
     }
-    values.push(currentValue.replace(/\r/g, '').trim());
-    
+    values.push(currentValue.replace(/\r/g, "").trim());
+
     const row: Record<string, string> = {};
     headers.forEach((h, index) => {
-      row[h] = (values[index] ?? '').replace(/^"|"$/g, '');
+      row[h] = (values[index] ?? "").replace(/^"|"$/g, "");
     });
     result.push(row);
   }
   return { headers, result, separator };
 };
 
-const normalizeWorkItemType = (row: Record<string, string | number | null | undefined>) =>
-  String(row['Work Item Type'] ?? row['Work Item Type '] ?? '').trim();
+const normalizeWorkItemType = (
+  row: Record<string, string | number | null | undefined>,
+) => String(row["Work Item Type"] ?? row["Work Item Type "] ?? "").trim();
 
-const isParentWorkItemType = (type: string) => type === 'Épico' || type === 'Demanda';
+const isParentWorkItemType = (type: string) =>
+  type === "Épico" || type === "Demanda";
 
-const extractSprintName = (row: Record<string, string | number | null | undefined>): string | undefined => {
-  const path = String(row['Iteration Path'] ?? '').trim();
+const extractSprintName = (
+  row: Record<string, string | number | null | undefined>,
+): string | undefined => {
+  const path = String(row["Iteration Path"] ?? "").trim();
   if (!path) return undefined;
-  const segments = path.split('\\');
+  const segments = path.split("\\");
   return segments[segments.length - 1];
 };
 
-const extractSquadName = (row: Record<string, string | number | null | undefined>): string | undefined => {
-  const path = String(row['Iteration Path'] ?? '').trim();
+const extractSquadName = (
+  row: Record<string, string | number | null | undefined>,
+): string | undefined => {
+  const path = String(row["Iteration Path"] ?? "").trim();
   if (!path) return undefined;
-  const segments = path.split('\\');
+  const segments = path.split("\\");
   return segments[3];
 };
 
-const processCSVData = (data: Record<string, string | number | null | undefined>[]) => {
+const processCSVData = (
+  data: Record<string, string | number | null | undefined>[],
+) => {
   let minTime = Infinity;
   const validRows = data.filter((r) => {
     const type = normalizeWorkItemType(r);
@@ -195,7 +239,12 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
     return true;
   });
 
-  const dateFields = ['Start Date', 'Target Date', 'Activated Date', 'State Change Date'] as const;
+  const dateFields = [
+    "Start Date",
+    "Target Date",
+    "Activated Date",
+    "State Change Date",
+  ] as const;
   validRows.forEach((row) => {
     for (const field of dateFields) {
       const parsed = parseDate(row[field] as string);
@@ -205,13 +254,19 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
     }
   });
 
-  if (minTime === Infinity) return { mapped: [] as Activity[], minTime: new Date().getTime(), assignees: [] as string[], tags: [] as string[] };
+  if (minTime === Infinity)
+    return {
+      mapped: [] as Activity[],
+      minTime: new Date().getTime(),
+      assignees: [] as string[],
+      tags: [] as string[],
+    };
 
   const getDayDifference = (date: Date | null) => {
-     if (!date) return 0;
-     const diffMs = date.getTime() - minTime;
-     const days = Math.floor(diffMs / ONE_DAY_MS);
-     return Math.max(0, days);
+    if (!date) return 0;
+    const diffMs = date.getTime() - minTime;
+    const days = Math.floor(diffMs / ONE_DAY_MS);
+    return Math.max(0, days);
   };
 
   const activities: Activity[] = [];
@@ -221,41 +276,55 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
   const demandasNeedingChildSpan = new Set<string | number>();
   let currentParent: Activity | null = null;
 
-  const extractTags = (row: Record<string, string | number | null | undefined>): string | undefined => {
-    const raw = String(row.Tags ?? '').trim();
+  const extractTags = (
+    row: Record<string, string | number | null | undefined>,
+  ): string | undefined => {
+    const raw = String(row.Tags ?? "").trim();
     if (!raw) return undefined;
-    const tags = raw.split(';').map(t => t.trim()).filter(Boolean);
-    tags.forEach(t => allTags.add(t));
-    return tags.join(';');
+    const tags = raw
+      .split(";")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    tags.forEach((t) => allTags.add(t));
+    return tags.join(";");
   };
 
   for (const row of validRows) {
     if (!row) continue;
-    const assignee = row['Assigned To'] as string;
+    const assignee = row["Assigned To"] as string;
     if (assignee) assignees.add(assignee);
-    
+
     const workItemType = normalizeWorkItemType(row);
-    const workItemTitle = (row['Work Item Title'] ?? row['Work Item Title '] ?? row.Title ?? 'Sem título') as string;
+    const workItemTitle = (row["Work Item Title"] ??
+      row["Work Item Title "] ??
+      row.Title ??
+      "Sem título") as string;
     const isParentItem = isParentWorkItemType(workItemType);
-    
-    const start = parseDate(row['Start Date'] as string);
-    const target = parseDate(row['Target Date'] as string);
-    const activated = parseDate(row['Activated Date'] as string);
-    const stateChange = parseDate(row['State Change Date'] as string);
-    
+
+    const start = parseDate(row["Start Date"] as string);
+    const target = parseDate(row["Target Date"] as string);
+    const activated = parseDate(row["Activated Date"] as string);
+    const stateChange = parseDate(row["State Change Date"] as string);
+
     const effort = parseInt(row.Effort as string) || 0;
     const planStartDay = getDayDifference(start);
     const planEndDay = target ? getDayDifference(target) : null;
-    
+
     // Percent complete logic
     let percentComplete = 0;
-    const state = ((row.State as string) ?? '').toLowerCase();
-    if (state.includes('done')) percentComplete = 100;
-    else if (state.includes('doing') || state.includes('developing') || state.includes('active')) percentComplete = 50;
+    const state = ((row.State as string) ?? "").toLowerCase();
+    if (state.includes("done")) percentComplete = 100;
+    else if (
+      state.includes("doing") ||
+      state.includes("developing") ||
+      state.includes("active")
+    )
+      percentComplete = 50;
 
     if (isParentItem) {
-      const parentKind: ParentKind = workItemType === 'Demanda' ? 'Demanda' : 'Épico';
-      const isDemanda = parentKind === 'Demanda';
+      const parentKind: ParentKind =
+        workItemType === "Demanda" ? "Demanda" : "Épico";
+      const isDemanda = parentKind === "Demanda";
 
       if (isDemanda) {
         currentParent = {
@@ -275,7 +344,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           tags: extractTags(row),
           effortTotal: 0,
           childrenCount: 0,
-          assignedTo: row['Assigned To'] as string,
+          assignedTo: row["Assigned To"] as string,
         };
         demandasNeedingChildSpan.add(currentParent.id);
       } else {
@@ -296,7 +365,7 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
           tags: extractTags(row),
           effortTotal: 0,
           childrenCount: 0,
-          assignedTo: row['Assigned To'] as string,
+          assignedTo: row["Assigned To"] as string,
           actualStartDateMs: Infinity,
           actualEndDateMs: -Infinity,
         };
@@ -304,14 +373,20 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
       }
       activities.push(currentParent);
     } else {
-      const planDurationDays = planEndDay ? Math.max(1, planEndDay - planStartDay) : 7;
-      
+      const planDurationDays = planEndDay
+        ? Math.max(1, planEndDay - planStartDay)
+        : 7;
+
       // Child actual logic: min(Activated Date) to max(State Change Date)
       // If dates are missing, fallback to plan
-      const childActualStart = activated ? getDayDifference(activated) : planStartDay;
-      const childActualEnd = stateChange ? getDayDifference(stateChange) : childActualStart + 1;
+      const childActualStart = activated
+        ? getDayDifference(activated)
+        : planStartDay;
+      const childActualEnd = stateChange
+        ? getDayDifference(stateChange)
+        : childActualStart + 1;
       const actualDurationDays = Math.max(1, childActualEnd - childActualStart);
-      
+
       const child: Activity = {
         id: (row.ID as string) ?? `c-${activities.length}`,
         name: workItemTitle,
@@ -322,15 +397,15 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
         percentComplete: percentComplete,
         isChild: true,
         workItemType,
-        parentKind: currentParent?.parentKind ?? 'Épico',
+        parentKind: currentParent?.parentKind ?? "Épico",
         sprintName: extractSprintName(row),
         iterationLevel4: extractSquadName(row),
         tags: extractTags(row),
         effortPoints: effort,
         parentId: currentParent?.id,
-        assignedTo: row['Assigned To'] as string
+        assignedTo: row["Assigned To"] as string,
       };
-      
+
       activities.push(child);
 
       if (currentParent) {
@@ -338,30 +413,49 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
         currentParent.effortTotal = (currentParent.effortTotal ?? 0) + effort;
 
         // Demanda dates come only from Activated/State Change (row or children rollup)
-        if (currentParent.workItemType === 'Demanda') continue;
+        if (currentParent.workItemType === "Demanda") continue;
 
         currentParent.isActualPlaceholder = false;
 
         // Update Épico parent actual boundaries based on children
         if (activated) {
-          currentParent.actualStartDateMs = Math.min(currentParent.actualStartDateMs!, activated.getTime());
+          currentParent.actualStartDateMs = Math.min(
+            currentParent.actualStartDateMs!,
+            activated.getTime(),
+          );
         } else if (start) {
           // Fallback if child has no activated date
-          currentParent.actualStartDateMs = Math.min(currentParent.actualStartDateMs!, start.getTime());
+          currentParent.actualStartDateMs = Math.min(
+            currentParent.actualStartDateMs!,
+            start.getTime(),
+          );
         }
 
         if (stateChange) {
-          currentParent.actualEndDateMs = Math.max(currentParent.actualEndDateMs!, stateChange.getTime());
+          currentParent.actualEndDateMs = Math.max(
+            currentParent.actualEndDateMs!,
+            stateChange.getTime(),
+          );
         } else if (activated) {
-          currentParent.actualEndDateMs = Math.max(currentParent.actualEndDateMs!, activated.getTime() + ONE_DAY_MS);
+          currentParent.actualEndDateMs = Math.max(
+            currentParent.actualEndDateMs!,
+            activated.getTime() + ONE_DAY_MS,
+          );
         }
 
         // Apply updated dates to parent
         if (currentParent.actualStartDateMs !== Infinity) {
-          currentParent.actualStart = getDayDifference(new Date(currentParent.actualStartDateMs!));
+          currentParent.actualStart = getDayDifference(
+            new Date(currentParent.actualStartDateMs!),
+          );
           if (currentParent.actualEndDateMs !== -Infinity) {
-            const endDay = getDayDifference(new Date(currentParent.actualEndDateMs!));
-            currentParent.actualDuration = Math.max(1, endDay - currentParent.actualStart);
+            const endDay = getDayDifference(
+              new Date(currentParent.actualEndDateMs!),
+            );
+            currentParent.actualDuration = Math.max(
+              1,
+              endDay - currentParent.actualStart,
+            );
           } else {
             currentParent.actualDuration = 1;
           }
@@ -374,11 +468,16 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
   for (const parent of activities.filter((a) => a.isParent)) {
     const children = activities.filter((c) => c.parentId === parent.id);
     parent.childrenCount = children.length;
-    parent.effortTotal = children.reduce((sum, c) => sum + (c.effortPoints ?? 0), 0);
+    parent.effortTotal = children.reduce(
+      (sum, c) => sum + (c.effortPoints ?? 0),
+      0,
+    );
   }
 
   // Épicos without plan dates: derive plan span from children's Start/Target
-  for (const parent of activities.filter((a) => a.isParent && parentsWithoutPlanDates.has(a.id))) {
+  for (const parent of activities.filter(
+    (a) => a.isParent && parentsWithoutPlanDates.has(a.id),
+  )) {
     const children = activities.filter((c) => c.parentId === parent.id);
     if (children.length === 0) continue;
 
@@ -390,35 +489,51 @@ const processCSVData = (data: Record<string, string | number | null | undefined>
     if (parent.isActualPlaceholder) {
       parent.isActualPlaceholder = false;
       parent.actualStart = Math.min(...children.map((c) => c.actualStart));
-      const actualEnd = Math.max(...children.map((c) => c.actualStart + c.actualDuration));
+      const actualEnd = Math.max(
+        ...children.map((c) => c.actualStart + c.actualDuration),
+      );
       parent.actualDuration = Math.max(1, actualEnd - parent.actualStart);
     }
   }
 
   // Demandas: bars derived from children dates
-  for (const parent of activities.filter((a) => a.isParent && demandasNeedingChildSpan.has(a.id))) {
+  for (const parent of activities.filter(
+    (a) => a.isParent && demandasNeedingChildSpan.has(a.id),
+  )) {
     const children = activities.filter((c) => c.parentId === parent.id);
     if (children.length === 0) continue;
 
     const actualStarts = children.map((c) => c.actualStart);
     const actualEnds = children.map((c) => c.actualStart + c.actualDuration);
     parent.actualStart = Math.min(...actualStarts);
-    parent.actualDuration = Math.max(1, Math.max(...actualEnds) - parent.actualStart);
+    parent.actualDuration = Math.max(
+      1,
+      Math.max(...actualEnds) - parent.actualStart,
+    );
     parent.planStart = parent.actualStart;
     parent.planDuration = parent.actualDuration;
     parent.isActualPlaceholder = false;
   }
 
-  return { mapped: sortAndGroupActivities(activities), minTime, assignees: Array.from(assignees).sort(), tags: Array.from(allTags).sort() };
+  return {
+    mapped: sortAndGroupActivities(activities),
+    minTime,
+    assignees: Array.from(assignees).sort(),
+    tags: Array.from(allTags).sort(),
+  };
 };
 
 const tagColorClass = (tag: string) => {
-  const key = tag.replace(/^[A-Z]+:\s*/i, '').toLowerCase();
+  const key = tag.replace(/^[A-Z]+:\s*/i, "").toLowerCase();
   switch (key) {
-    case 'done': return 'bg-green-100 text-green-700 border-green-200';
-    case 'at risk': return 'bg-orange-100 text-orange-700 border-orange-200';
-    case 'deprioritized': return 'bg-red-100 text-red-700 border-red-200';
-    default: return 'bg-indigo-100 text-indigo-700 border-indigo-200';
+    case "done":
+      return "bg-green-100 text-green-700 border-green-200";
+    case "at risk":
+      return "bg-orange-100 text-orange-700 border-orange-200";
+    case "deprioritized":
+      return "bg-red-100 text-red-700 border-red-200";
+    default:
+      return "bg-indigo-100 text-indigo-700 border-indigo-200";
   }
 };
 
@@ -438,29 +553,33 @@ const TagMultiSelect = ({
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node) &&
-          dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        ref.current &&
+        !ref.current.contains(e.target as Node) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
   useEffect(() => {
     if (open && ref.current) {
       const rect = ref.current.getBoundingClientRect();
       setDropdownStyle({
-        position: 'fixed',
+        position: "fixed",
         top: rect.bottom + 4,
         left: rect.left + rect.width / 2,
-        transform: 'translateX(-50%)',
+        transform: "translateX(-50%)",
       });
     }
   }, [open]);
 
   const toggle = (tag: string) => {
-    setSelectedTags(prev => {
+    setSelectedTags((prev) => {
       const next = new Set(prev);
       if (next.has(tag)) next.delete(tag);
       else next.add(tag);
@@ -472,44 +591,70 @@ const TagMultiSelect = ({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600 transition-colors cursor-pointer mx-auto"
+        className="mx-auto flex cursor-pointer items-center gap-1 text-[10px] font-bold tracking-wider text-slate-400 uppercase transition-colors hover:text-slate-600"
       >
         Tags
-        <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown
+          size={10}
+          className={`transition-transform ${open ? "rotate-180" : ""}`}
+        />
       </button>
       {selectedTags.size > 0 && (
-        <div className="flex flex-wrap gap-0.5 mt-1 justify-center">
-          {allTags.filter(t => selectedTags.has(t)).map(tag => (
-            <span key={tag} className={`inline-flex items-center gap-0.5 px-1 py-[1px] rounded text-[7px] font-bold ${tagColorClass(tag)}`}>
-              {tag}
-              <button onClick={() => toggle(tag)} className="hover:text-indigo-900 cursor-pointer">
-                <X size={8} />
-              </button>
-            </span>
-          ))}
+        <div className="mt-1 flex flex-wrap justify-center gap-0.5">
+          {allTags
+            .filter((t) => selectedTags.has(t))
+            .map((tag) => (
+              <span
+                key={tag}
+                className={`inline-flex items-center gap-0.5 rounded px-1 py-[1px] text-[7px] font-bold ${tagColorClass(tag)}`}
+              >
+                {tag}
+                <button
+                  onClick={() => toggle(tag)}
+                  className="cursor-pointer hover:text-indigo-900"
+                >
+                  <X size={8} />
+                </button>
+              </span>
+            ))}
         </div>
       )}
-      {open && typeof document !== 'undefined' && createPortal(
-        <div ref={dropdownRef} style={dropdownStyle} className="w-48 bg-white border border-slate-200 rounded-lg shadow-xl z-[9999] max-h-60 overflow-y-auto">
-          {allTags.length === 0 ? (
-            <div className="p-3 text-[10px] text-slate-400 text-center">Nenhuma tag</div>
-          ) : (
-            allTags.map(tag => (
-              <label key={tag} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-[10px]">
-                <input
-                  type="checkbox"
-                  checked={selectedTags.has(tag)}
-                  onChange={() => toggle(tag)}
-                  className="accent-indigo-600"
-                />
-                <span className={`w-2 h-2 rounded-full ${tagColorClass(tag).split(' ').find(c => c.startsWith('bg-'))}`} />
-                <span className="text-slate-700">{tag}</span>
-              </label>
-            ))
-          )}
-        </div>,
-        document.body
-      )}
+      {open &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            style={dropdownStyle}
+            className="z-[9999] max-h-60 w-48 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl"
+          >
+            {allTags.length === 0 ? (
+              <div className="p-3 text-center text-[10px] text-slate-400">
+                Nenhuma tag
+              </div>
+            ) : (
+              allTags.map((tag) => (
+                <label
+                  key={tag}
+                  className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[10px] hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedTags.has(tag)}
+                    onChange={() => toggle(tag)}
+                    className="accent-indigo-600"
+                  />
+                  <span
+                    className={`h-2 w-2 rounded-full ${tagColorClass(tag)
+                      .split(" ")
+                      .find((c) => c.startsWith("bg-"))}`}
+                  />
+                  <span className="text-slate-700">{tag}</span>
+                </label>
+              ))
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };
@@ -524,29 +669,38 @@ const TagEditor = ({
   onUpdate: (tags: string) => void;
 }) => {
   const [open, setOpen] = useState(false);
-  const [newTag, setNewTag] = useState('');
+  const [newTag, setNewTag] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
 
-  const tags = value ? value.split(';').map(t => t.trim()).filter(Boolean) : [];
+  const tags = value
+    ? value
+        .split(";")
+        .map((t) => t.trim())
+        .filter(Boolean)
+    : [];
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node) &&
-          dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        ref.current &&
+        !ref.current.contains(e.target as Node) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
   useEffect(() => {
     if (open && ref.current) {
       const rect = ref.current.getBoundingClientRect();
       setDropdownStyle({
-        position: 'fixed',
+        position: "fixed",
         top: rect.bottom + 4,
         left: rect.left,
       });
@@ -555,73 +709,114 @@ const TagEditor = ({
 
   const toggle = (tag: string) => {
     if (tags.includes(tag)) {
-      onUpdate(tags.filter(t => t !== tag).join(';'));
+      onUpdate(tags.filter((t) => t !== tag).join(";"));
     } else {
-      onUpdate([...tags, tag].join(';'));
+      onUpdate([...tags, tag].join(";"));
     }
   };
 
   const handleAddNew = () => {
     const t = newTag.trim();
     if (!t || tags.includes(t)) return;
-    onUpdate([...tags, t].join(';'));
-    setNewTag('');
+    onUpdate([...tags, t].join(";"));
+    setNewTag("");
   };
 
-  const unselected = allTags.filter(t => !tags.includes(t));
+  const unselected = allTags.filter((t) => !tags.includes(t));
 
   return (
     <div className="relative" ref={ref}>
-      <div className="flex flex-wrap gap-1 items-center">
-        {tags.map(tag => (
-          <span key={tag} className={`inline-flex items-center gap-0.5 px-1.5 py-[1px] rounded text-[8px] font-bold border ${tagColorClass(tag)}`}>
+      <div className="flex flex-wrap items-center gap-1">
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-[1px] text-[8px] font-bold ${tagColorClass(tag)}`}
+          >
             {tag}
-            <button onClick={() => toggle(tag)} className="hover:text-indigo-900 cursor-pointer">
+            <button
+              onClick={() => toggle(tag)}
+              className="cursor-pointer hover:text-indigo-900"
+            >
               <X size={8} />
             </button>
           </span>
         ))}
         <button
           onClick={() => setOpen(!open)}
-          className="text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+          className="cursor-pointer text-slate-400 transition-colors hover:text-slate-600"
           title="Adicionar tag"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" /><path d="M12 8v8" /><path d="M8 12h8" />
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 8v8" />
+            <path d="M8 12h8" />
           </svg>
         </button>
       </div>
-      {open && typeof document !== 'undefined' && createPortal(
-        <div ref={dropdownRef} style={dropdownStyle} className="w-52 bg-white border border-slate-200 rounded-lg shadow-xl z-[9999] max-h-60 overflow-y-auto p-2">
-          <div className="flex gap-1 mb-2">
-            <input
-              value={newTag}
-              onChange={e => setNewTag(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { handleAddNew(); } }}
-              placeholder="Nova tag..."
-              className="flex-1 px-2 py-1 border border-slate-200 rounded text-[10px] outline-none focus:border-indigo-400"
-            />
-            <button onClick={handleAddNew} className="px-2 py-1 bg-indigo-600 text-white rounded text-[9px] font-bold hover:bg-indigo-700 cursor-pointer">+</button>
-          </div>
-          {unselected.length > 0 ? (
-            unselected.map(tag => (
-              <label key={tag} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 cursor-pointer text-[10px] rounded">
-                <input
-                  type="checkbox"
-                  checked={false}
-                  onChange={() => toggle(tag)}
-                  className="accent-indigo-600"
-                />
-                <span className={`w-2 h-2 rounded-full ${tagColorClass(tag).split(' ').find(c => c.startsWith('bg-'))}`} />
-                <span className="text-slate-700">{tag}</span>
-              </label>
-            ))
-          ) : (
-            <div className="text-[10px] text-slate-400 text-center py-2">Todas as tags já adicionadas</div>
-          )}
-        </div>,
-        document.body
-      )}
+      {open &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            style={dropdownStyle}
+            className="z-[9999] max-h-60 w-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 shadow-xl"
+          >
+            <div className="mb-2 flex gap-1">
+              <input
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    handleAddNew();
+                  }
+                }}
+                placeholder="Nova tag..."
+                className="flex-1 rounded border border-slate-200 px-2 py-1 text-[10px] outline-none focus:border-indigo-400"
+              />
+              <button
+                onClick={handleAddNew}
+                className="cursor-pointer rounded bg-indigo-600 px-2 py-1 text-[9px] font-bold text-white hover:bg-indigo-700"
+              >
+                +
+              </button>
+            </div>
+            {unselected.length > 0 ? (
+              unselected.map((tag) => (
+                <label
+                  key={tag}
+                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-[10px] hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={false}
+                    onChange={() => toggle(tag)}
+                    className="accent-indigo-600"
+                  />
+                  <span
+                    className={`h-2 w-2 rounded-full ${tagColorClass(tag)
+                      .split(" ")
+                      .find((c) => c.startsWith("bg-"))}`}
+                  />
+                  <span className="text-slate-700">{tag}</span>
+                </label>
+              ))
+            ) : (
+              <div className="py-2 text-center text-[10px] text-slate-400">
+                Todas as tags já adicionadas
+              </div>
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };
@@ -642,29 +837,33 @@ const MonthMultiSelect = ({
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node) &&
-          dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        ref.current &&
+        !ref.current.contains(e.target as Node) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
   useEffect(() => {
     if (open && ref.current) {
       const rect = ref.current.getBoundingClientRect();
       setDropdownStyle({
-        position: 'fixed',
+        position: "fixed",
         top: rect.bottom + 4,
         left: rect.left + rect.width / 2,
-        transform: 'translateX(-50%)',
+        transform: "translateX(-50%)",
       });
     }
   }, [open]);
 
   const toggle = (month: string) => {
-    setSelectedMonths(prev => {
+    setSelectedMonths((prev) => {
       const next = new Set(prev);
       if (next.has(month)) next.delete(month);
       else next.add(month);
@@ -673,52 +872,74 @@ const MonthMultiSelect = ({
   };
 
   const monthLabel = (key: string) => {
-    const [y, m] = key.split('-').map(Number);
+    const [y, m] = key.split("-").map(Number);
     const date = new Date(y!, m! - 1);
-    return date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    return date.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
   };
 
   return (
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600 transition-colors cursor-pointer mx-auto"
+        className="mx-auto flex cursor-pointer items-center gap-1 text-[10px] font-bold tracking-wider text-slate-400 uppercase transition-colors hover:text-slate-600"
       >
         Períodos
-        <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown
+          size={10}
+          className={`transition-transform ${open ? "rotate-180" : ""}`}
+        />
       </button>
       {selectedMonths.size > 0 && (
-        <div className="flex flex-wrap gap-0.5 mt-1 justify-center">
-          {availableMonths.filter(m => selectedMonths.has(m)).map(m => (
-            <span key={m} className="inline-flex items-center gap-0.5 px-1 py-[1px] rounded text-[7px] font-bold bg-indigo-100 text-indigo-700 border border-indigo-200">
-              {monthLabel(m)}
-              <button onClick={() => toggle(m)} className="hover:text-indigo-900 cursor-pointer">
-                <X size={8} />
-              </button>
-            </span>
-          ))}
+        <div className="mt-1 flex flex-wrap justify-center gap-0.5">
+          {availableMonths
+            .filter((m) => selectedMonths.has(m))
+            .map((m) => (
+              <span
+                key={m}
+                className="inline-flex items-center gap-0.5 rounded border border-indigo-200 bg-indigo-100 px-1 py-[1px] text-[7px] font-bold text-indigo-700"
+              >
+                {monthLabel(m)}
+                <button
+                  onClick={() => toggle(m)}
+                  className="cursor-pointer hover:text-indigo-900"
+                >
+                  <X size={8} />
+                </button>
+              </span>
+            ))}
         </div>
       )}
-      {open && typeof document !== 'undefined' && createPortal(
-        <div ref={dropdownRef} style={dropdownStyle} className="w-52 bg-white border border-slate-200 rounded-lg shadow-xl z-[9999] max-h-60 overflow-y-auto">
-          {availableMonths.length === 0 ? (
-            <div className="p-3 text-[10px] text-slate-400 text-center">Nenhum período</div>
-          ) : (
-            availableMonths.map(m => (
-              <label key={m} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-[10px]">
-                <input
-                  type="checkbox"
-                  checked={selectedMonths.has(m)}
-                  onChange={() => toggle(m)}
-                  className="accent-indigo-600"
-                />
-                <span className="text-slate-700">{monthLabel(m)}</span>
-              </label>
-            ))
-          )}
-        </div>,
-        document.body
-      )}
+      {open &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            style={dropdownStyle}
+            className="z-[9999] max-h-60 w-52 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl"
+          >
+            {availableMonths.length === 0 ? (
+              <div className="p-3 text-center text-[10px] text-slate-400">
+                Nenhum período
+              </div>
+            ) : (
+              availableMonths.map((m) => (
+                <label
+                  key={m}
+                  className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[10px] hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedMonths.has(m)}
+                    onChange={() => toggle(m)}
+                    className="accent-indigo-600"
+                  />
+                  <span className="text-slate-700">{monthLabel(m)}</span>
+                </label>
+              ))
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };
@@ -726,19 +947,22 @@ const MonthMultiSelect = ({
 const App = () => {
   const [activities, setActivities] = useState<Activity[]>(initialActivities);
   const [assignees, setAssignees] = useState<string[]>([]);
-  const [assignedToFilter, setAssignedToFilter] = useState('');
-  const [iterationLevel4Filter, setIterationLevel4Filter] = useState('');
+  const [assignedToFilter, setAssignedToFilter] = useState("");
+  const [iterationLevel4Filter, setIterationLevel4Filter] = useState("");
   const [allTags, setAllTags] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [baseDate, setBaseDate] = useState(new Date(2026, 0, 1));
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [collapsedParents, setCollapsedParents] = useState<Set<string | number>>(new Set());
+  const [collapsedParents, setCollapsedParents] = useState<
+    Set<string | number>
+  >(new Set());
   const [showActualBars, setShowActualBars] = useState(true);
   const [selectedMonths, setSelectedMonths] = useState<Set<string>>(new Set());
 
   const [undoStack, setUndoStack] = useState<Activity[][]>([]);
   const [redoStack, setRedoStack] = useState<Activity[][]>([]);
+  const [isResumoOpen, setIsResumoOpen] = useState(false);
   const activitiesRef = useRef(activities);
   activitiesRef.current = activities;
   const canUndo = undoStack.length > 0;
@@ -747,7 +971,7 @@ const App = () => {
   const { toast } = useToast();
 
   const toggleCollapsed = (parentId: string | number) => {
-    setCollapsedParents(prev => {
+    setCollapsedParents((prev) => {
       const next = new Set(prev);
       if (next.has(parentId)) next.delete(parentId);
       else next.add(parentId);
@@ -756,9 +980,14 @@ const App = () => {
   };
 
   const updateActivityTags = (activityId: string | number, tags: string) => {
-    setActivities(prev => prev.map(act => act.id === activityId ? { ...act, tags } : act));
-    const allNewTags = tags.split(';').map(t => t.trim()).filter(Boolean);
-    setAllTags(prev => {
+    setActivities((prev) =>
+      prev.map((act) => (act.id === activityId ? { ...act, tags } : act)),
+    );
+    const allNewTags = tags
+      .split(";")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    setAllTags((prev) => {
       const updated = new Set([...prev, ...allNewTags]);
       return Array.from(updated).sort();
     });
@@ -766,47 +995,55 @@ const App = () => {
   };
 
   // Store original CSV data for export mapping
-  const [rawCsvData, setRawCsvData] = useState<Record<string, string | number | null | undefined>[]>([]);
+  const [rawCsvData, setRawCsvData] = useState<
+    Record<string, string | number | null | undefined>[]
+  >([]);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
-  const [csvSeparator, setCsvSeparator] = useState(',');
+  const [csvSeparator, setCsvSeparator] = useState(",");
 
   const iterationLevel4List = useMemo(() => {
     const set = new Set<string>();
-    activities.forEach(act => { if (act.iterationLevel4) set.add(act.iterationLevel4); });
+    activities.forEach((act) => {
+      if (act.iterationLevel4) set.add(act.iterationLevel4);
+    });
     return Array.from(set).sort();
   }, [activities]);
 
   const filteredAssignees = useMemo(() => {
     if (!iterationLevel4Filter) return assignees;
     const squadActivityIds = new Set<string | number>();
-    activities.forEach(act => {
+    activities.forEach((act) => {
       if (act.iterationLevel4 === iterationLevel4Filter) {
         squadActivityIds.add(act.id);
         if (act.isParent) {
-          activities.filter(c => c.parentId === act.id).forEach(c => squadActivityIds.add(c.id));
+          activities
+            .filter((c) => c.parentId === act.id)
+            .forEach((c) => squadActivityIds.add(c.id));
         }
       }
     });
-    return assignees.filter(a =>
-      activities.some(act => squadActivityIds.has(act.id) && act.assignedTo === a)
+    return assignees.filter((a) =>
+      activities.some(
+        (act) => squadActivityIds.has(act.id) && act.assignedTo === a,
+      ),
     );
   }, [activities, assignees, iterationLevel4Filter]);
 
   // Reset assignee filter if current selection is no longer in the filtered list
   useEffect(() => {
     if (assignedToFilter && !filteredAssignees.includes(assignedToFilter)) {
-      setAssignedToFilter('');
+      setAssignedToFilter("");
     }
   }, [assignedToFilter, filteredAssignees]);
 
   const filteredActivities = useMemo(() => {
     let result = activities;
-    
+
     if (assignedToFilter) {
       const matchedIds = new Set<string | number>();
-      
+
       // First pass: match by assignee and collect parent IDs
-      activities.forEach(act => {
+      activities.forEach((act) => {
         if (act.assignedTo === assignedToFilter) {
           matchedIds.add(act.id);
           if (act.parentId) matchedIds.add(act.parentId);
@@ -814,66 +1051,89 @@ const App = () => {
       });
 
       // Second pass: if a parent is matched, match all its children to keep the tree view consistent
-      activities.forEach(act => {
+      activities.forEach((act) => {
         if (act.isParent && matchedIds.has(act.id)) {
-          activities.filter(child => child.parentId === act.id).forEach(child => {
-            matchedIds.add(child.id);
-          });
+          activities
+            .filter((child) => child.parentId === act.id)
+            .forEach((child) => {
+              matchedIds.add(child.id);
+            });
         }
       });
 
-      result = activities.filter(act => matchedIds.has(act.id));
+      result = activities.filter((act) => matchedIds.has(act.id));
     }
 
     if (iterationLevel4Filter) {
       const matchedIds = new Set<string | number>();
-      activities.forEach(act => {
+      activities.forEach((act) => {
         if (act.iterationLevel4 === iterationLevel4Filter) {
           matchedIds.add(act.id);
           if (act.parentId) matchedIds.add(act.parentId);
         }
       });
-      activities.forEach(act => {
+      activities.forEach((act) => {
         if (act.isParent && matchedIds.has(act.id)) {
-          activities.filter(child => child.parentId === act.id).forEach(child => {
-            matchedIds.add(child.id);
-          });
+          activities
+            .filter((child) => child.parentId === act.id)
+            .forEach((child) => {
+              matchedIds.add(child.id);
+            });
         }
       });
-      result = result.filter(act => matchedIds.has(act.id));
+      result = result.filter((act) => matchedIds.has(act.id));
     }
 
     if (selectedTags.size > 0) {
       const matchedIds = new Set<string | number>();
-      activities.forEach(act => {
-        const actTags = act.tags ? act.tags.split(';').map(t => t.trim()) : [];
-        const hasTag = actTags.some(t => selectedTags.has(t));
+      activities.forEach((act) => {
+        const actTags = act.tags
+          ? act.tags.split(";").map((t) => t.trim())
+          : [];
+        const hasTag = actTags.some((t) => selectedTags.has(t));
         if (hasTag) {
           matchedIds.add(act.id);
           if (act.parentId) matchedIds.add(act.parentId);
         }
       });
-      activities.forEach(act => {
+      activities.forEach((act) => {
         if (act.isParent && matchedIds.has(act.id)) {
-          activities.filter(child => child.parentId === act.id).forEach(child => {
-            matchedIds.add(child.id);
-          });
+          activities
+            .filter((child) => child.parentId === act.id)
+            .forEach((child) => {
+              matchedIds.add(child.id);
+            });
         }
       });
-      result = result.filter(act => matchedIds.has(act.id));
+      result = result.filter((act) => matchedIds.has(act.id));
     }
 
     // Filter out children of collapsed parents — preserve original sort order (from load)
-    return result.filter(act => !act.parentId || !collapsedParents.has(act.parentId));
-  }, [activities, assignedToFilter, iterationLevel4Filter, collapsedParents, selectedTags]);
+    return result.filter(
+      (act) => !act.parentId || !collapsedParents.has(act.parentId),
+    );
+  }, [
+    activities,
+    assignedToFilter,
+    iterationLevel4Filter,
+    collapsedParents,
+    selectedTags,
+  ]);
 
-  const displayRows = useMemo(() => buildDisplayRows(filteredActivities), [filteredActivities]);
+  const displayRows = useMemo(
+    () => buildDisplayRows(filteredActivities),
+    [filteredActivities],
+  );
 
   // Dynamically calculate full period count based on the filtered activity list
   const fullPeriodCount = useMemo(() => {
     let maxEnd = 1;
-    filteredActivities.forEach(act => {
-      maxEnd = Math.max(maxEnd, act.planStart + act.planDuration, act.actualStart + act.actualDuration);
+    filteredActivities.forEach((act) => {
+      maxEnd = Math.max(
+        maxEnd,
+        act.planStart + act.planDuration,
+        act.actualStart + act.actualDuration,
+      );
     });
     return maxEnd + 5; // Extra padding for visualization
   }, [filteredActivities]);
@@ -883,11 +1143,15 @@ const App = () => {
     let minDay = Infinity;
     let maxDay = -Infinity;
     for (const monthKey of selectedMonths) {
-      const [y, m] = monthKey.split('-').map(Number);
+      const [y, m] = monthKey.split("-").map(Number);
       const firstOfMonth = new Date(y!, m! - 1, 1);
       const lastOfMonth = new Date(y!, m!, 0);
-      const firstDay = Math.floor((firstOfMonth.getTime() - baseDate.getTime()) / ONE_DAY_MS);
-      const lastDay = Math.floor((lastOfMonth.getTime() - baseDate.getTime()) / ONE_DAY_MS);
+      const firstDay = Math.floor(
+        (firstOfMonth.getTime() - baseDate.getTime()) / ONE_DAY_MS,
+      );
+      const lastDay = Math.floor(
+        (lastOfMonth.getTime() - baseDate.getTime()) / ONE_DAY_MS,
+      );
       if (firstDay < minDay) minDay = firstDay;
       if (lastDay + 1 > maxDay) maxDay = lastDay + 1;
     }
@@ -897,7 +1161,10 @@ const App = () => {
     };
   }, [selectedMonths, baseDate, fullPeriodCount]);
 
-  const periodCount = useMemo(() => visibleRange.end - visibleRange.start, [visibleRange]);
+  const periodCount = useMemo(
+    () => visibleRange.end - visibleRange.start,
+    [visibleRange],
+  );
 
   const todayOffset = useMemo(() => {
     const now = new Date();
@@ -911,58 +1178,78 @@ const App = () => {
   // Resizing state for the "Activity" column
   const [activityWidth, setActivityWidth] = useState(260);
   const [isResizingCol, setIsResizingCol] = useState(false);
-  
+
   // Dragging state for Gantt bars
   const [dragState, setDragState] = useState<DragState | null>(null);
   const startXRef = useRef(0);
   const startValRef = useRef(0);
 
-  const getDateFromDay = useMemo(() => (dayNum: number) => {
-    return new Date(baseDate.getTime() + dayNum * ONE_DAY_MS);
-  }, [baseDate]);
+  const getDateFromDay = useMemo(
+    () => (dayNum: number) => {
+      return new Date(baseDate.getTime() + dayNum * ONE_DAY_MS);
+    },
+    [baseDate],
+  );
 
   const formatDate = (date: Date) => {
-    return `${String(date.getDate()).padStart(2, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    return `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}`;
   };
 
   const availableMonths = useMemo(() => {
     const set = new Set<string>();
-    activities.forEach(act => {
+    activities.forEach((act) => {
       const start = getDateFromDay(act.planStart);
-      set.add(`${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`);
+      set.add(
+        `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`,
+      );
       const end = getDateFromDay(act.planStart + act.planDuration);
-      set.add(`${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}`);
+      set.add(
+        `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}`,
+      );
       if (act.actualDuration > 0) {
         const aEnd = getDateFromDay(act.actualStart + act.actualDuration);
-        set.add(`${aEnd.getFullYear()}-${String(aEnd.getMonth() + 1).padStart(2, '0')}`);
+        set.add(
+          `${aEnd.getFullYear()}-${String(aEnd.getMonth() + 1).padStart(2, "0")}`,
+        );
       }
     });
     return Array.from(set).sort();
   }, [activities, getDateFromDay]);
 
-  const getDateRangeStr = useMemo(() => (startDay: number, duration: number) => {
-    const startDate = getDateFromDay(startDay);
-    const endDate = getDateFromDay(startDay + duration - 1); // Shows up to the end of the final day
-    return `${formatDate(startDate)} to ${formatDate(endDate)}`;
-  }, [getDateFromDay]);
+  const getDateRangeStr = useMemo(
+    () => (startDay: number, duration: number) => {
+      const startDate = getDateFromDay(startDay);
+      const endDate = getDateFromDay(startDay + duration - 1); // Shows up to the end of the final day
+      return `${formatDate(startDate)} to ${formatDate(endDate)}`;
+    },
+    [getDateFromDay],
+  );
 
   const monthsHeader = useMemo(() => {
-    const months: { month: string; start: number; days: number; label: string }[] = [];
+    const months: {
+      month: string;
+      start: number;
+      days: number;
+      label: string;
+    }[] = [];
     let currentMonth: string | null = null;
     let currentStart = 0;
     let currentMonthDate: Date | null = null;
-    
+
     for (let i = visibleRange.start; i < visibleRange.end; i++) {
       const date = getDateFromDay(i);
       const monthKey = `${date.getMonth()}-${date.getFullYear()}`;
-      
+
       if (currentMonth !== monthKey) {
         if (currentMonth !== null && currentMonthDate) {
           months.push({
             month: currentMonth,
             start: currentStart - visibleRange.start,
-            days: (i - visibleRange.start) - currentStart,
-            label: currentMonthDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+            days: i - visibleRange.start - currentStart,
+            label: currentMonthDate.toLocaleDateString("pt-BR", {
+              month: "long",
+              year: "numeric",
+            }),
           });
         }
         currentMonth = monthKey;
@@ -970,16 +1257,19 @@ const App = () => {
         currentMonthDate = date;
       }
     }
-    
+
     if (currentMonth !== null && currentMonthDate) {
       months.push({
         month: currentMonth,
         start: currentStart,
-        days: (visibleRange.end - visibleRange.start) - currentStart,
-        label: currentMonthDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+        days: visibleRange.end - visibleRange.start - currentStart,
+        label: currentMonthDate.toLocaleDateString("pt-BR", {
+          month: "long",
+          year: "numeric",
+        }),
       });
     }
-    
+
     return months;
   }, [getDateFromDay, visibleRange]);
 
@@ -990,26 +1280,33 @@ const App = () => {
       return {
         num: dayNum,
         day: date.getDate(),
-        label: String(date.getDate()).padStart(2, '0')
+        label: String(date.getDate()).padStart(2, "0"),
       };
     });
   }, [getDateFromDay, periodCount, visibleRange]);
 
   const sprints = useMemo(() => {
-    const sprintMap = new Map<string, { label: string; minStart: number; maxEnd: number }>();
+    const sprintMap = new Map<
+      string,
+      { label: string; minStart: number; maxEnd: number }
+    >();
     const rangeStart = visibleRange.start;
     const rangeEnd = visibleRange.end;
     for (const act of filteredActivities) {
       const name = act.sprintName;
       if (!name) continue;
-      const entry = sprintMap.get(name) ?? { label: name, minStart: Infinity, maxEnd: -Infinity };
+      const entry = sprintMap.get(name) ?? {
+        label: name,
+        minStart: Infinity,
+        maxEnd: -Infinity,
+      };
       const end = act.planStart + act.planDuration;
       entry.minStart = Math.min(entry.minStart, act.planStart);
       entry.maxEnd = Math.max(entry.maxEnd, end);
       sprintMap.set(name, entry);
     }
     return Array.from(sprintMap.values())
-      .map(s => {
+      .map((s) => {
         const sStart = Math.max(s.minStart, rangeStart);
         const sEnd = Math.min(Math.max(s.minStart + 1, s.maxEnd), rangeEnd);
         return {
@@ -1018,7 +1315,7 @@ const App = () => {
           endDay: Math.max(sStart + 1, sEnd) - rangeStart,
         };
       })
-      .filter(s => s.startDay < s.endDay)
+      .filter((s) => s.startDay < s.endDay)
       .sort((a, b) => a.startDay - b.startDay)
       .map((s, idx) => ({ ...s, index: idx + 1 }));
   }, [filteredActivities, visibleRange]);
@@ -1032,36 +1329,40 @@ const App = () => {
       } else if (dragState) {
         const deltaX = e.clientX - dragState.startX;
         const deltaDays = Math.round(deltaX / DAY_WIDTH);
-        
-        if (deltaDays === 0 && dragState.action === 'move') return;
 
-        setActivities(prev => {
-          const newActivities = prev.map(act => {
+        if (deltaDays === 0 && dragState.action === "move") return;
+
+        setActivities((prev) => {
+          const newActivities = prev.map((act) => {
             if (act.id !== dragState.id || act.isDateLocked) return act;
 
-            const isPlan = dragState.type === 'plan';
-            const startKey = isPlan ? 'planStart' : 'actualStart';
-            const durKey = isPlan ? 'planDuration' : 'actualDuration';
+            const isPlan = dragState.type === "plan";
+            const startKey = isPlan ? "planStart" : "actualStart";
+            const durKey = isPlan ? "planDuration" : "actualDuration";
 
             let newStart = dragState.originalStart;
             let newDur = dragState.originalDuration;
 
-            if (dragState.action === 'move') {
+            if (dragState.action === "move") {
               newStart = Math.max(0, dragState.originalStart + deltaDays);
-            } else if (dragState.action === 'resize-end') {
+            } else if (dragState.action === "resize-end") {
               newDur = Math.max(1, dragState.originalDuration + deltaDays);
-            } else if (dragState.action === 'resize-start') {
+            } else if (dragState.action === "resize-start") {
               newStart = Math.max(0, dragState.originalStart + deltaDays);
-              newDur = dragState.originalDuration - (newStart - dragState.originalStart);
+              newDur =
+                dragState.originalDuration -
+                (newStart - dragState.originalStart);
               if (newDur < 1) {
                 newDur = 1;
-                newStart = dragState.originalStart + dragState.originalDuration - 1;
+                newStart =
+                  dragState.originalStart + dragState.originalDuration - 1;
               }
             }
 
             // Only update if something actually changed
-            if (act[startKey] === newStart && act[durKey] === newDur) return act;
-            
+            if (act[startKey] === newStart && act[durKey] === newDur)
+              return act;
+
             setIsDirty(true);
             return { ...act, [startKey]: newStart, [durKey]: newDur };
           });
@@ -1072,8 +1373,8 @@ const App = () => {
 
     const handleMouseUp = () => {
       setIsResizingCol(false);
-    if (isResizingCol || dragState) {
-        setUndoStack(prev => {
+      if (isResizingCol || dragState) {
+        setUndoStack((prev) => {
           const next = [...prev, activitiesRef.current];
           return next.length > 50 ? next.slice(-50) : next;
         });
@@ -1083,25 +1384,25 @@ const App = () => {
     };
 
     if (isResizingCol || dragState) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.userSelect = 'none'; // Prevent text selection
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.userSelect = "none"; // Prevent text selection
     } else {
-      document.body.style.userSelect = '';
+      document.body.style.userSelect = "";
     }
 
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.userSelect = '';
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.userSelect = "";
     };
   }, [isResizingCol, dragState]);
 
   const handleUndo = useCallback(() => {
     if (undoStack.length === 0) return;
     const previous = undoStack[undoStack.length - 1]!;
-    setRedoStack(prev => [...prev, activities]);
-    setUndoStack(prev => prev.slice(0, -1));
+    setRedoStack((prev) => [...prev, activities]);
+    setUndoStack((prev) => prev.slice(0, -1));
     setActivities(previous);
     setIsDirty(true);
   }, [undoStack, activities]);
@@ -1109,24 +1410,24 @@ const App = () => {
   const handleRedo = useCallback(() => {
     if (redoStack.length === 0) return;
     const next = redoStack[redoStack.length - 1]!;
-    setUndoStack(prev => [...prev, activities]);
-    setRedoStack(prev => prev.slice(0, -1));
+    setUndoStack((prev) => [...prev, activities]);
+    setRedoStack((prev) => prev.slice(0, -1));
     setActivities(next);
     setIsDirty(true);
   }, [redoStack, activities]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'z') {
+      if (e.ctrlKey && e.shiftKey && e.key === "z") {
         e.preventDefault();
         handleRedo();
-      } else if (e.ctrlKey && e.key === 'z') {
+      } else if (e.ctrlKey && e.key === "z") {
         e.preventDefault();
         handleUndo();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleUndo, handleRedo]);
 
   const handleColMouseDown = (e: React.MouseEvent) => {
@@ -1138,8 +1439,8 @@ const App = () => {
   const handleBarMouseDown = (
     e: React.MouseEvent,
     activity: Activity,
-    type: 'plan' | 'actual',
-    action: 'move' | 'resize-start' | 'resize-end',
+    type: "plan" | "actual",
+    action: "move" | "resize-start" | "resize-end",
     originalStart: number,
     originalDuration: number,
   ) => {
@@ -1151,7 +1452,7 @@ const App = () => {
       action,
       startX: e.clientX,
       originalStart,
-      originalDuration
+      originalDuration,
     });
   };
 
@@ -1159,7 +1460,7 @@ const App = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const isXlsx = file.name.endsWith('.xlsx');
+    const isXlsx = file.name.endsWith(".xlsx");
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -1169,63 +1470,73 @@ const App = () => {
 
       if (isXlsx) {
         const arrayBuf = event.target?.result as ArrayBuffer;
-        const workbook = XLSX.read(arrayBuf, { type: 'array' });
+        const workbook = XLSX.read(arrayBuf, { type: "array" });
         const sheetName = workbook.SheetNames[0];
         if (!sheetName) {
-          toast('Nenhuma planilha encontrada no arquivo.', 'error');
+          toast("Nenhuma planilha encontrada no arquivo.", "error");
           return;
         }
         const sheet = workbook.Sheets[sheetName]!;
 
         // Read as raw array of arrays to locate the real header row
-        const rawData = XLSX.utils.sheet_to_json<(string | number | null | undefined)[]>(sheet, { header: 1 });
+        const rawData = XLSX.utils.sheet_to_json<
+          (string | number | null | undefined)[]
+        >(sheet, { header: 1 });
 
         // Find the row that contains 'ID' and 'Work Item Type'
         let headerRowIndex = -1;
         for (let i = 0; i < rawData.length; i++) {
           const row = rawData[i];
-          if (row?.includes('ID') && row?.includes('Work Item Type')) {
+          if (row?.includes("ID") && row?.includes("Work Item Type")) {
             headerRowIndex = i;
             break;
           }
         }
 
         if (headerRowIndex === -1) {
-          toast("Formato de arquivo inválido. O arquivo deve conter as colunas 'ID' e 'Work Item Type'.", 'error');
+          toast(
+            "Formato de arquivo inválido. O arquivo deve conter as colunas 'ID' e 'Work Item Type'.",
+            "error",
+          );
           return;
         }
 
         const headerRow = rawData[headerRowIndex]!;
-        const excelHeaders = headerRow.map(h => String(h ?? ''));
+        const excelHeaders = headerRow.map((h) => String(h ?? ""));
         const dataRows = rawData.slice(headerRowIndex + 1);
 
         const formatExcelDate = (serial: number): string => {
           const utcDays = Math.floor(serial - 25569);
           const utcValue = utcDays * 86400;
           const dateInfo = new Date(utcValue * 1000);
-          const d = String(dateInfo.getDate()).padStart(2, '0');
-          const m = String(dateInfo.getMonth() + 1).padStart(2, '0');
+          const d = String(dateInfo.getDate()).padStart(2, "0");
+          const m = String(dateInfo.getMonth() + 1).padStart(2, "0");
           const y = dateInfo.getFullYear();
           return `${d}/${m}/${y} 00:00:00`;
         };
 
         const rows = dataRows
-          .map(row => {
+          .map((row) => {
             const obj: Record<string, string | number | null | undefined> = {};
             excelHeaders.forEach((header, index) => {
               let value = row[index];
-              if (typeof value === 'number' && (header.includes('Date') || header === 'Start Date' || header === 'Target Date')) {
+              if (
+                typeof value === "number" &&
+                (header.includes("Date") ||
+                  header === "Start Date" ||
+                  header === "Target Date")
+              ) {
                 value = formatExcelDate(value);
               }
               obj[header] = value;
             });
             return obj;
           })
-          .filter(row => Boolean(row.ID) || Boolean(row.Title));
+          .filter((row) => Boolean(row.ID) || Boolean(row.Title));
 
         data = rows;
         headers = excelHeaders;
-        separator = ',';
+        separator = ",";
       } else {
         const text = event.target?.result as string;
         const parsed = parseCSV(text);
@@ -1235,7 +1546,7 @@ const App = () => {
       }
 
       const { mapped, minTime, assignees, tags } = processCSVData(data);
-      
+
       if (mapped.length > 0) {
         setActivities(mapped);
         setBaseDate(new Date(minTime));
@@ -1247,12 +1558,15 @@ const App = () => {
         setIsDirty(false);
         setUndoStack([]);
         setRedoStack([]);
-        
+
         // Collapse all parents by default
-        const parentIds = mapped.filter(a => a.isParent).map(a => a.id);
+        const parentIds = mapped.filter((a) => a.isParent).map((a) => a.id);
         setCollapsedParents(new Set(parentIds));
       } else {
-        toast("Nenhum dado válido encontrado. O arquivo deve conter as colunas 'Title' e 'Start Date'.", 'error');
+        toast(
+          "Nenhum dado válido encontrado. O arquivo deve conter as colunas 'Title' e 'Start Date'.",
+          "error",
+        );
       }
     };
 
@@ -1261,27 +1575,32 @@ const App = () => {
     } else {
       reader.readAsText(file);
     }
-    e.target.value = ''; // reset to allow re-upload of the same file
+    e.target.value = ""; // reset to allow re-upload of the same file
   };
 
   // Load Excel data automatically on app start
   useEffect(() => {
     const loadExcelData = async () => {
       try {
-        const response = await fetch('/api/csv');
-        const result = (await response.json()) as { success: boolean; data: Record<string, string | number | null | undefined>[] };
-        
+        const response = await fetch("/api/csv");
+        const result = (await response.json()) as {
+          success: boolean;
+          data: Record<string, string | number | null | undefined>[];
+        };
+
         if (result.success && result.data && result.data.length > 0) {
           // Store raw data and headers
           setRawCsvData(result.data);
           const firstRow = result.data[0];
           const headers = firstRow ? Object.keys(firstRow) : [];
           setCsvHeaders(headers);
-          setCsvSeparator(','); // Default for Excel-derived JSON
+          setCsvSeparator(","); // Default for Excel-derived JSON
 
           // Process raw objects from XLSX utils
-          const { mapped, minTime, assignees, tags } = processCSVData(result.data);
-          
+          const { mapped, minTime, assignees, tags } = processCSVData(
+            result.data,
+          );
+
           if (mapped.length > 0) {
             setActivities(mapped);
             setBaseDate(new Date(minTime));
@@ -1292,12 +1611,12 @@ const App = () => {
             setRedoStack([]);
 
             // Collapse all parents by default
-            const parentIds = mapped.filter(a => a.isParent).map(a => a.id);
+            const parentIds = mapped.filter((a) => a.isParent).map((a) => a.id);
             setCollapsedParents(new Set(parentIds));
           }
         }
       } catch (error) {
-        console.error('Failed to load excel data:', error);
+        console.error("Failed to load excel data:", error);
       }
     };
 
@@ -1307,19 +1626,19 @@ const App = () => {
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (isDirty) {
-        e.preventDefault()
-        e.returnValue = ''
+        e.preventDefault();
+        e.returnValue = "";
       }
-    }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [isDirty])
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
 
   const handleSave = async () => {
     setIsSaving(true);
     const formatToCSVDate = (date: Date) => {
-      const d = String(date.getDate()).padStart(2, '0');
-      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, "0");
+      const m = String(date.getMonth() + 1).padStart(2, "0");
       const y = date.getFullYear();
       return `${d}/${m}/${y} 00:00:00`;
     };
@@ -1328,34 +1647,42 @@ const App = () => {
 
     // Fallback if the user tries exporting mock data without uploading a CSV first
     if (rawCsvData.length === 0) {
-      exportData = activities.map(act => {
+      exportData = activities.map((act) => {
         return {
-          'ID': act.id,
-          'Title': act.name,
-          'Start Date': formatToCSVDate(getDateFromDay(act.planStart)),
-          'Target Date': formatToCSVDate(getDateFromDay(act.planStart + act.planDuration - 1)),
-          'State Change Date': formatToCSVDate(getDateFromDay(act.actualStart + act.actualDuration - 1)),
-          'Percent Complete': act.percentComplete
+          ID: act.id,
+          Title: act.name,
+          "Start Date": formatToCSVDate(getDateFromDay(act.planStart)),
+          "Target Date": formatToCSVDate(
+            getDateFromDay(act.planStart + act.planDuration - 1),
+          ),
+          "State Change Date": formatToCSVDate(
+            getDateFromDay(act.actualStart + act.actualDuration - 1),
+          ),
+          "Percent Complete": act.percentComplete,
         };
       });
     } else {
       // Export original structure with adjusted dates
       exportData = rawCsvData.map((row, index) => {
         const activityId = row.ID ?? index + 1;
-        const activity = activities.find(a => a.id === activityId);
-        
-        if (activity) {
-           const planStartDate = getDateFromDay(activity.planStart);
-           const planEndDate = getDateFromDay(activity.planStart + activity.planDuration);
-           const actualEndDate = getDateFromDay(activity.actualStart + activity.actualDuration);
+        const activity = activities.find((a) => a.id === activityId);
 
-           return {
-              ...row,
-              'Start Date': formatToCSVDate(planStartDate),
-              'Target Date': formatToCSVDate(planEndDate),
-              'State Change Date': formatToCSVDate(actualEndDate),
-              'Tags': activity.tags ?? ''
-            };
+        if (activity) {
+          const planStartDate = getDateFromDay(activity.planStart);
+          const planEndDate = getDateFromDay(
+            activity.planStart + activity.planDuration,
+          );
+          const actualEndDate = getDateFromDay(
+            activity.actualStart + activity.actualDuration,
+          );
+
+          return {
+            ...row,
+            "Start Date": formatToCSVDate(planStartDate),
+            "Target Date": formatToCSVDate(planEndDate),
+            "State Change Date": formatToCSVDate(actualEndDate),
+            Tags: activity.tags ?? "",
+          };
         }
         return row;
       });
@@ -1365,14 +1692,19 @@ const App = () => {
     try {
       const worksheet = XLSX.utils.json_to_sheet(exportData);
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Planejamento');
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Planejamento");
 
-      const buf = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as BlobPart;
-      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const buf = XLSX.write(workbook, {
+        type: "array",
+        bookType: "xlsx",
+      }) as BlobPart;
+      const blob = new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
 
       const fileName = `planejamento_exportado_${Date.now()}.xlsx`;
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
       a.download = fileName;
       document.body.appendChild(a);
@@ -1380,224 +1712,274 @@ const App = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast(`Arquivo baixado: ${fileName}`, 'success');
+      toast(`Arquivo baixado: ${fileName}`, "success");
       setUndoStack([]);
       setRedoStack([]);
       setIsDirty(false);
     } catch (_error) {
-      toast('Erro ao gerar arquivo XLSX', 'error');
+      toast("Erro ao gerar arquivo XLSX", "error");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const LegendItem = ({ colorClass, label }: { colorClass: string; label: string }) => (
+  const LegendItem = ({
+    colorClass,
+    label,
+  }: {
+    colorClass: string;
+    label: string;
+  }) => (
     <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-600">
-      <div className={`w-3 h-3 rounded-sm border border-slate-300 ${colorClass}`}></div>
+      <div
+        className={`h-3 w-3 rounded-sm border border-slate-300 ${colorClass}`}
+      ></div>
       <span>{label}</span>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans">
-      <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200">
-        
+    <div className="min-h-screen bg-slate-50 p-4 font-sans md:p-8">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         {/* Header Section */}
-        <div className="p-5 border-b border-slate-100 bg-white">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="border-b border-slate-100 bg-white p-5">
+          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-indigo-600 rounded-lg text-white">
+                <div className="rounded-lg bg-indigo-600 p-1.5 text-white">
                   <Calendar size={20} />
                 </div>
-                <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">Estratégia de Portfólio</h1>
+                <h1 className="text-xl font-extrabold tracking-tight text-slate-900">
+                  Estratégia de Portfólio
+                </h1>
                 {isDirty && (
-                  <div className="flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-bold animate-pulse border border-amber-200">
+                  <div className="flex animate-pulse items-center gap-1 rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
                     <AlertCircle size={10} />
                     <span>Alterações Pendentes</span>
                   </div>
                 )}
               </div>
-              <p className="text-slate-500 font-medium text-xs">Visualização e planejamento de épicos e demandas trimestrais com sincronização em tempo real.</p>
+              <p className="text-xs font-medium text-slate-500">
+                Visualização e planejamento de épicos e demandas trimestrais com
+                sincronização em tempo real.
+              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-               {/* Primary Actions */}
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-                   <button
-                     onClick={handleUndo}
-                     disabled={!canUndo}
-                     className={`p-1.5 rounded-lg text-xs font-bold shadow-sm transition-all border ${
-                       canUndo
-                         ? 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200 active:scale-95 cursor-pointer'
-                         : 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed'
-                     }`}
-                     title="Desfazer (Ctrl+Z)"
-                   >
-                     <Undo2 size={14} />
-                   </button>
-                   <button
-                     onClick={handleRedo}
-                     disabled={!canRedo}
-                     className={`p-1.5 rounded-lg text-xs font-bold shadow-sm transition-all border ${
-                       canRedo
-                         ? 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200 active:scale-95 cursor-pointer'
-                         : 'bg-slate-100 text-slate-300 border-slate-100 cursor-not-allowed'
-                     }`}
-                     title="Refazer (Ctrl+Shift+Z)"
-                   >
-                     <Redo2 size={14} />
-                   </button>
-                   <button 
-                     onClick={handleSave}
-                    disabled={!isDirty || isSaving}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all ${
-                      isDirty 
-                        ? 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 cursor-pointer' 
-                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                    }`}
-                  >
-                    {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-                    <span>{isSaving ? 'Salvando...' : 'Salvar'}</span>
-                  </button>
-                  <button 
-                    onClick={() => {
-                      if (!isDirty || window.confirm('Há alterações não salvas. Deseja realmente recarregar?')) {
-                        window.location.reload()
-                      }
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-600 rounded-lg hover:bg-slate-50 text-xs font-bold transition-all border border-slate-200 active:scale-95"
-                    title="Descartar alterações e recarregar"
-                  >
-                    <RefreshCw size={14} />
-                    <span>Recarregar</span>
-                  </button>
-               </div>
+              {/* Primary Actions */}
+              <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
+                <button
+                  onClick={handleUndo}
+                  disabled={!canUndo}
+                  className={`rounded-lg border p-1.5 text-xs font-bold shadow-sm transition-all ${
+                    canUndo
+                      ? "cursor-pointer border-slate-200 bg-white text-slate-600 hover:bg-slate-50 active:scale-95"
+                      : "cursor-not-allowed border-slate-100 bg-slate-100 text-slate-300"
+                  }`}
+                  title="Desfazer (Ctrl+Z)"
+                >
+                  <Undo2 size={14} />
+                </button>
+                <button
+                  onClick={handleRedo}
+                  disabled={!canRedo}
+                  className={`rounded-lg border p-1.5 text-xs font-bold shadow-sm transition-all ${
+                    canRedo
+                      ? "cursor-pointer border-slate-200 bg-white text-slate-600 hover:bg-slate-50 active:scale-95"
+                      : "cursor-not-allowed border-slate-100 bg-slate-100 text-slate-300"
+                  }`}
+                  title="Refazer (Ctrl+Shift+Z)"
+                >
+                  <Redo2 size={14} />
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={!isDirty || isSaving}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold shadow-sm transition-all ${
+                    isDirty
+                      ? "cursor-pointer bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95"
+                      : "cursor-not-allowed bg-slate-200 text-slate-400"
+                  }`}
+                >
+                  {isSaving ? (
+                    <RefreshCw size={14} className="animate-spin" />
+                  ) : (
+                    <Save size={14} />
+                  )}
+                  <span>{isSaving ? "Salvando..." : "Salvar"}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    if (
+                      !isDirty ||
+                      window.confirm(
+                        "Há alterações não salvas. Deseja realmente recarregar?",
+                      )
+                    ) {
+                      window.location.reload();
+                    }
+                  }}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition-all hover:bg-slate-50 active:scale-95"
+                  title="Descartar alterações e recarregar"
+                >
+                  <RefreshCw size={14} />
+                  <span>Recarregar</span>
+                </button>
+              </div>
 
-               {/* Import/Export */}
-               <div className="flex items-center gap-2">
-                 <label className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg hover:bg-slate-900 cursor-pointer transition-all text-xs font-bold shadow-sm active:scale-95">
-                    <Upload size={14} />
-                    <span>Importar</span>
-                    <input type="file" accept=".csv,.xlsx" className="hidden" onChange={handleFileUpload} />
-                  </label>
-               </div>
+              {/* Import/Export */}
+              <div className="flex items-center gap-2">
+                <label className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-all hover:bg-slate-900 active:scale-95">
+                  <Upload size={14} />
+                  <span>Importar</span>
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+                </label>
+                <button
+                  onClick={() => setIsResumoOpen(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 shadow-sm transition-all hover:bg-slate-50 active:scale-95"
+                >
+                  <BarChart3 size={14} />
+                  <span>Resumo</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3 py-2.5 px-4 bg-slate-50/50 rounded-xl border border-slate-100">
-              <div className="flex items-center gap-2 pr-4 border-r border-slate-200">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Responsável:</span>
-                <select 
-                  className="px-2 py-1 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all min-w-[140px]"
-                  value={assignedToFilter}
-                  onChange={(e) => setAssignedToFilter(e.target.value)}
-                >
-                  <option value="">Todos os Responsáveis</option>
-                  {filteredAssignees.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </div>
-              <div className="flex items-center gap-2 pr-4 border-r border-slate-200">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Squad:</span>
-                <select 
-                  className="px-2 py-1 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all min-w-[140px]"
-                  value={iterationLevel4Filter}
-                  onChange={(e) => setIterationLevel4Filter(e.target.value)}
-                >
-                  <option value="">Todos os Squads</option>
-                  {iterationLevel4List.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div className="flex items-center gap-2 pr-4 border-r border-slate-200">
-                <MonthMultiSelect availableMonths={availableMonths} selectedMonths={selectedMonths} setSelectedMonths={setSelectedMonths} />
-              </div>
-              <div className="flex flex-wrap gap-4 ml-auto">
-                <LegendItem colorClass="bg-indigo-200 border-indigo-300" label="Planejado" />
-                <LegendItem colorClass="bg-emerald-500 border-emerald-600" label="Progresso" />
-                <LegendItem colorClass="bg-rose-500 border-rose-600" label="Atraso" />
-                <button
-                  onClick={() => setShowActualBars(prev => !prev)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer active:scale-95 ${
-                    showActualBars
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                      : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200'
-                  }`}
-                >
-                  {showActualBars ? '🔵' : '⚪'} Real
-                </button>
-              </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/50 px-4 py-2.5">
+            <div className="flex items-center gap-2 border-r border-slate-200 pr-4">
+              <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                Responsável:
+              </span>
+              <select
+                className="min-w-[140px] rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition-all outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                value={assignedToFilter}
+                onChange={(e) => setAssignedToFilter(e.target.value)}
+              >
+                <option value="">Todos os Responsáveis</option>
+                {filteredAssignees.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 border-r border-slate-200 pr-4">
+              <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                Squad:
+              </span>
+              <select
+                className="min-w-[140px] rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition-all outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                value={iterationLevel4Filter}
+                onChange={(e) => setIterationLevel4Filter(e.target.value)}
+              >
+                <option value="">Todos os Squads</option>
+                {iterationLevel4List.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 border-r border-slate-200 pr-4">
+              <MonthMultiSelect
+                availableMonths={availableMonths}
+                selectedMonths={selectedMonths}
+                setSelectedMonths={setSelectedMonths}
+              />
+            </div>
+            <div className="ml-auto flex flex-wrap gap-4">
+              <LegendItem
+                colorClass="bg-indigo-200 border-indigo-300"
+                label="Planejado"
+              />
+              <LegendItem
+                colorClass="bg-emerald-500 border-emerald-600"
+                label="Progresso"
+              />
+              <LegendItem
+                colorClass="bg-rose-500 border-rose-600"
+                label="Atraso"
+              />
+              <button
+                onClick={() => setShowActualBars((prev) => !prev)}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-all active:scale-95 ${
+                  showActualBars
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    : "border-slate-200 bg-slate-100 text-slate-400 hover:bg-slate-200"
+                }`}
+              >
+                {showActualBars ? "🔵" : "⚪"} Real
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Gantt Chart Area */}
-        <div className="overflow-x-auto custom-scrollbar">
-          <table className="w-full border-collapse text-[11px] table-fixed">
-            <thead className="sticky top-0 bg-white z-30 shadow-sm">
+        <div className="custom-scrollbar overflow-x-auto">
+          <table className="w-full table-fixed border-collapse text-[11px]">
+            <thead className="sticky top-0 z-30 bg-white shadow-sm">
               <tr className="border-b border-slate-200">
-                <th 
-                  className="sticky left-0 z-30 p-3 text-left font-bold uppercase tracking-wider text-slate-400 bg-white text-[10px]"
+                <th
+                  className="sticky left-0 z-30 bg-white p-3 text-left text-[10px] font-bold tracking-wider text-slate-400 uppercase"
                   style={{ width: activityWidth, minWidth: activityWidth }}
                 >
                   Atividade
-                  <div 
-                    className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-400 bg-slate-100 z-40 transition-colors"
+                  <div
+                    className="absolute top-0 right-0 bottom-0 z-40 w-1 cursor-col-resize bg-slate-100 transition-colors hover:bg-indigo-400"
                     onMouseDown={handleColMouseDown}
                   />
                 </th>
-                <th 
-                  className="sticky z-20 p-3 text-center font-bold uppercase tracking-wider text-slate-400 bg-white text-[10px]"
+                <th
+                  className="sticky z-20 bg-white p-3 text-center text-[10px] font-bold tracking-wider text-slate-400 uppercase"
                   style={{ left: activityWidth, width: 128, minWidth: 128 }}
                 >
                   Cronograma
                 </th>
-                <th 
-                  className="sticky z-20 p-3 text-center font-bold uppercase tracking-wider text-slate-400 bg-white text-[10px]"
-                  style={{ left: activityWidth + 128, width: TAGS_WIDTH, minWidth: TAGS_WIDTH }}
+                <th
+                  className="sticky z-20 bg-white p-3 text-center text-[10px] font-bold tracking-wider text-slate-400 uppercase"
+                  style={{
+                    left: activityWidth + 128,
+                    width: TAGS_WIDTH,
+                    minWidth: TAGS_WIDTH,
+                  }}
                 >
-                  <TagMultiSelect allTags={allTags} selectedTags={selectedTags} setSelectedTags={setSelectedTags} />
+                  <TagMultiSelect
+                    allTags={allTags}
+                    selectedTags={selectedTags}
+                    setSelectedTags={setSelectedTags}
+                  />
                 </th>
-                
+
                 {/* Timeline Header */}
-                <th className="p-0 bg-white relative">
+                <th className="relative bg-white p-0">
                   {/* Month Row */}
                   <div className="flex border-b border-slate-100">
                     {monthsHeader.map((month, idx) => (
-                      <div 
+                      <div
                         key={idx}
-                        style={{ 
-                          minWidth: `${month.days * DAY_WIDTH}px`, 
-                          width: `${month.days * DAY_WIDTH}px`
+                        style={{
+                          minWidth: `${month.days * DAY_WIDTH}px`,
+                          width: `${month.days * DAY_WIDTH}px`,
                         }}
-                        className={`h-8 flex items-center justify-center border-l border-slate-100 font-extrabold text-[9px] text-slate-600 bg-slate-50/50 uppercase tracking-widest ${idx === monthsHeader.length - 1 ? 'flex-1' : ''}`}
+                        className={`flex h-8 items-center justify-center border-l border-slate-100 bg-slate-50/50 text-[9px] font-extrabold tracking-widest text-slate-600 uppercase ${idx === monthsHeader.length - 1 ? "flex-1" : ""}`}
                       >
                         {month.label}
                       </div>
                     ))}
                   </div>
-                  {/* Sprint Row */}
-                  <div className="flex border-b border-slate-100">
-                    {sprints.map((s, idx) => (
-                      <div 
-                        key={s.index}
-                        style={{ 
-                          minWidth: `${(s.endDay - s.startDay) * DAY_WIDTH}px`, 
-                          width: `${(s.endDay - s.startDay) * DAY_WIDTH}px`
-                        }}
-                        className={`h-5 flex items-center justify-center border-l border-slate-200 font-extrabold text-[8px] tracking-widest ${
-                          s.index % 2 === 0 ? 'bg-indigo-50/60 text-indigo-600' : 'bg-white text-slate-500'
-                        } ${idx === sprints.length - 1 ? 'flex-1' : ''}`}
-                      >
-                        {s.label}
-                      </div>
-                    ))}
-                  </div>
+
                   {/* Days Row */}
                   <div className="flex">
                     {daysData.map((p, idx) => (
-                      <div 
-                        key={p.num} 
+                      <div
+                        key={p.num}
                         style={{ minWidth: DAY_WIDTH, width: DAY_WIDTH }}
-                        className={`h-7 flex items-center justify-center border-l border-slate-50 font-bold text-[9px] transition-colors text-slate-400 hover:bg-slate-50 ${idx === daysData.length - 1 ? 'flex-1' : ''}`}
+                        className={`flex h-7 items-center justify-center border-l border-slate-50 text-[9px] font-bold text-slate-400 transition-colors hover:bg-slate-50 ${idx === daysData.length - 1 ? "flex-1" : ""}`}
                       >
                         {p.label}
                       </div>
@@ -1605,10 +1987,10 @@ const App = () => {
                   </div>
                   {isTodayVisible && (
                     <div
-                      className="absolute top-0 bottom-0 w-[2px] bg-red-500 z-20 pointer-events-none"
+                      className="pointer-events-none absolute top-0 bottom-0 z-20 w-[2px] bg-red-500"
                       style={{ left: `${todayOffset * DAY_WIDTH}px` }}
                     >
-                      <div className="absolute -top-[3px] left-1/2 -translate-x-1/2 bg-red-500 text-white text-[7px] font-bold px-1 py-[1px] rounded whitespace-nowrap leading-none">
+                      <div className="absolute -top-[3px] left-1/2 -translate-x-1/2 rounded bg-red-500 px-1 py-[1px] text-[7px] leading-none font-bold whitespace-nowrap text-white">
                         Hoje
                       </div>
                     </div>
@@ -1616,19 +1998,42 @@ const App = () => {
                 </th>
               </tr>
             </thead>
-            
+
             <tbody className="divide-y divide-slate-100">
               {displayRows.map((row) => {
-                if (row.type === 'section') {
+                if (row.type === "section") {
                   return (
-                    <tr key={`section-${row.kind}`} className="border-y bg-slate-100/90 text-slate-700 border-slate-200">
-                      <td className="sticky left-0 z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest pointer-events-none" style={{ width: activityWidth, minWidth: activityWidth }}>
+                    <tr
+                      key={`section-${row.kind}`}
+                      className="border-y border-slate-200 bg-slate-100/90 text-slate-700"
+                    >
+                      <td
+                        className="pointer-events-none sticky left-0 z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black tracking-widest uppercase"
+                        style={{
+                          width: activityWidth,
+                          minWidth: activityWidth,
+                        }}
+                      >
                         {row.label}
                       </td>
-                      <td className="sticky z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest pointer-events-none" style={{ left: activityWidth, width: 128, minWidth: 128 }}>
+                      <td
+                        className="pointer-events-none sticky z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black tracking-widest uppercase"
+                        style={{
+                          left: activityWidth,
+                          width: 128,
+                          minWidth: 128,
+                        }}
+                      >
                         {row.label}
                       </td>
-                      <td className="sticky z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest pointer-events-none" style={{ left: activityWidth + 128, width: TAGS_WIDTH, minWidth: TAGS_WIDTH }}>
+                      <td
+                        className="pointer-events-none sticky z-[15] bg-slate-100/90 px-3 py-1.5 text-[10px] font-black tracking-widest uppercase"
+                        style={{
+                          left: activityWidth + 128,
+                          width: TAGS_WIDTH,
+                          minWidth: TAGS_WIDTH,
+                        }}
+                      >
                         {row.label}
                       </td>
                       <td className="px-3 py-1.5" />
@@ -1639,75 +2044,144 @@ const App = () => {
                 const activity = row.activity;
                 // Pre-calculate bar properties for accurate rendering
                 const planEnd = activity.planStart + activity.planDuration;
-                const actualEnd = activity.actualStart + activity.actualDuration;
-                
+                const actualEnd =
+                  activity.actualStart + activity.actualDuration;
+
                 // For Actual bar: calculate green (normal) vs red (overage) split
-                const overagePeriods = Math.max(0, actualEnd - Math.max(activity.actualStart, planEnd));
+                const overagePeriods = Math.max(
+                  0,
+                  actualEnd - Math.max(activity.actualStart, planEnd),
+                );
                 const normalPeriods = activity.actualDuration - overagePeriods;
 
                 // Add child/effort labels
                 const isCollapsed = collapsedParents.has(activity.id);
                 const label = (
-                   <div className={`flex flex-col gap-1.5 w-full ${activity.isChild ? 'pl-8' : 'pl-2'}`}>
-                     <div className="flex items-center gap-2 pr-4">
-                        {activity.isParent ? (
-                          <button 
-                            onClick={() => toggleCollapsed(activity.id)}
-                            className="p-0.5 hover:bg-slate-200 rounded transition-colors pointer-events-auto"
-                          >
-                            {isCollapsed ? <ChevronRight size={12} className="text-slate-500" /> : <ChevronDown size={12} className="text-slate-500" />}
-                          </button>
-                        ) : (
-                          <div className="w-4" />
-                        )}
-                        <span className={`truncate text-[11px] ${activity.isParent ? 'font-extrabold text-slate-900' : 'text-slate-600 font-medium'}`} title={activity.name}>
-                           {activity.name}
+                  <div
+                    className={`flex w-full flex-col gap-1.5 ${activity.isChild ? "pl-8" : "pl-2"}`}
+                  >
+                    <div className="flex items-center gap-2 pr-4">
+                      {activity.isParent ? (
+                        <button
+                          onClick={() => toggleCollapsed(activity.id)}
+                          className="pointer-events-auto rounded p-0.5 transition-colors hover:bg-slate-200"
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight
+                              size={12}
+                              className="text-slate-500"
+                            />
+                          ) : (
+                            <ChevronDown size={12} className="text-slate-500" />
+                          )}
+                        </button>
+                      ) : (
+                        <div className="w-4" />
+                      )}
+                      <span
+                        className={`truncate text-[11px] ${activity.isParent ? "font-extrabold text-slate-900" : "font-medium text-slate-600"}`}
+                        title={activity.name}
+                      >
+                        {activity.name}
+                      </span>
+                    </div>
+                    {activity.isParent && (
+                      <div className="flex gap-1.5 pl-[20px]">
+                        <span className="rounded-full border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[8px] font-bold text-indigo-700">
+                          {activity.childrenCount} itens
                         </span>
+                        <span className="rounded-full border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[8px] font-bold text-slate-600">
+                          {activity.effortTotal} pts
+                        </span>
+                        {activity.iterationLevel4 && (
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[8px] font-bold text-amber-700">
+                            {activity.iterationLevel4}
+                          </span>
+                        )}
                       </div>
-                      {activity.isParent && (
-                        <div className="flex gap-1.5 pl-[20px]">
-                          <span className="text-[8px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold border border-indigo-100">{activity.childrenCount} itens</span>
-                          <span className="text-[8px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortTotal} pts</span>
-                          {activity.iterationLevel4 && (
-                            <span className="text-[8px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-full font-bold border border-amber-200">{activity.iterationLevel4}</span>
-                          )}
-                        </div>
-                      )}
-                      {activity.isChild && (
-                        <div className="flex gap-1.5 pl-[20px]">
-                          <span className="text-[8px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-bold border border-slate-200">{activity.effortPoints} pts</span>
-                          {activity.iterationLevel4 && (
-                            <span className="text-[8px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-full font-bold border border-amber-200">{activity.iterationLevel4}</span>
-                          )}
-                        </div>
-                      )}
-                   </div>
+                    )}
+                    {activity.isChild && (
+                      <div className="flex gap-1.5 pl-[20px]">
+                        <span className="rounded-full border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[8px] font-bold text-slate-600">
+                          {activity.effortPoints} pts
+                        </span>
+                        {activity.iterationLevel4 && (
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[8px] font-bold text-amber-700">
+                            {activity.iterationLevel4}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 );
 
                 return (
                   <React.Fragment key={activity.id}>
                     {/* ACTIVITY ROW */}
-                    <tr className={`group transition-colors border-b border-slate-100 ${activity.isParent ? 'bg-slate-50/80' : 'hover:bg-slate-50/30'}`}>
-                      <td className={`sticky left-0 z-[15] bg-white p-3 border-r border-slate-50 font-bold text-[11px] pointer-events-none ${activity.isParent ? 'text-slate-900' : 'text-slate-600'}`} style={{ width: activityWidth, minWidth: activityWidth, maxWidth: activityWidth }}>
+                    <tr
+                      className={`group border-b border-slate-100 transition-colors ${activity.isParent ? "bg-slate-50/80" : "hover:bg-slate-50/30"}`}
+                    >
+                      <td
+                        className={`pointer-events-none sticky left-0 z-[15] border-r border-slate-50 bg-white p-3 text-[11px] font-bold ${activity.isParent ? "text-slate-900" : "text-slate-600"}`}
+                        style={{
+                          width: activityWidth,
+                          minWidth: activityWidth,
+                          maxWidth: activityWidth,
+                        }}
+                      >
                         {label}
                       </td>
-                      <td className="sticky z-[15] bg-white p-3 text-center font-bold text-indigo-600 border-r border-slate-50 text-[10px] pointer-events-none" style={{ left: activityWidth, width: 128, minWidth: 128 }}>{getDateRangeStr(activity.planStart, activity.planDuration)}</td>
-                      <td className="sticky z-[15] bg-white p-3 border-r border-slate-50" style={{ left: activityWidth + 128, width: TAGS_WIDTH, minWidth: TAGS_WIDTH }}>
-                        <TagEditor value={activity.tags} allTags={allTags} onUpdate={(tags) => updateActivityTags(activity.id, tags)} />
+                      <td
+                        className="pointer-events-none sticky z-[15] border-r border-slate-50 bg-white p-3 text-center text-[10px] font-bold text-indigo-600"
+                        style={{
+                          left: activityWidth,
+                          width: 128,
+                          minWidth: 128,
+                        }}
+                      >
+                        {getDateRangeStr(
+                          activity.planStart,
+                          activity.planDuration,
+                        )}
                       </td>
-                      <td className="p-0 relative bg-white h-[60px]">
+                      <td
+                        className="sticky z-[15] border-r border-slate-50 bg-white p-3"
+                        style={{
+                          left: activityWidth + 128,
+                          width: TAGS_WIDTH,
+                          minWidth: TAGS_WIDTH,
+                        }}
+                      >
+                        <TagEditor
+                          value={activity.tags}
+                          allTags={allTags}
+                          onUpdate={(tags) =>
+                            updateActivityTags(activity.id, tags)
+                          }
+                        />
+                      </td>
+                      <td className="relative h-[60px] bg-white p-0">
                         {/* Background Grid Lines */}
-                        <div className="flex h-full absolute inset-0 pointer-events-none">
+                        <div className="pointer-events-none absolute inset-0 flex h-full">
                           {daysData.map((p, idx) => {
-                            const isSprintStart = sprints.some(s => s.startDay === idx);
+                            const isSprintStart = sprints.some(
+                              (s) => s.startDay === idx,
+                            );
                             return (
-                              <div key={p.num} style={{ minWidth: DAY_WIDTH, width: DAY_WIDTH }} className={`border-l ${isSprintStart ? 'border-indigo-300' : 'border-slate-50'} ${isSprintStart ? 'border-l-2' : ''} ${idx === daysData.length - 1 ? 'flex-1' : ''}`} />
+                              <div
+                                key={p.num}
+                                style={{
+                                  minWidth: DAY_WIDTH,
+                                  width: DAY_WIDTH,
+                                }}
+                                className={`border-l ${isSprintStart ? "border-indigo-300" : "border-slate-50"} ${isSprintStart ? "border-l-2" : ""} ${idx === daysData.length - 1 ? "flex-1" : ""}`}
+                              />
                             );
                           })}
                         </div>
                         {/* Sprint background shading */}
-                        <div className="flex h-full absolute inset-0 pointer-events-none">
-                          {sprints.map(s => (
+                        <div className="pointer-events-none absolute inset-0 flex h-full">
+                          {sprints.map((s) => (
                             <div
                               key={s.index}
                               style={{
@@ -1715,27 +2189,29 @@ const App = () => {
                                 width: `${(s.endDay - s.startDay) * DAY_WIDTH}px`,
                                 left: `${s.startDay * DAY_WIDTH}px`,
                               }}
-                              className={`h-full absolute ${s.index % 2 === 0 ? 'bg-indigo-50/20' : ''}`}
+                              className={`absolute h-full ${s.index % 2 === 0 ? "bg-indigo-50/20" : ""}`}
                             />
                           ))}
                         </div>
-                        
+
                         {isTodayVisible && (
                           <div
-                            className="absolute top-0 bottom-0 w-[1px] bg-red-500/70 z-20 pointer-events-none"
+                            className="pointer-events-none absolute top-0 bottom-0 z-20 w-[1px] bg-red-500/70"
                             style={{ left: `${todayOffset * DAY_WIDTH}px` }}
                           />
                         )}
-                        
+
                         {/* Interactive Plan Bar (Top Half) */}
                         {(() => {
                           const vStart = visibleRange.start;
                           const vEnd = visibleRange.end;
                           const rawStart = activity.planStart;
-                          const rawEnd = activity.planStart + activity.planDuration;
+                          const rawEnd =
+                            activity.planStart + activity.planDuration;
 
                           let barLeft: number, barWidth: number;
-                          let leftClip = false, rightClip = false;
+                          let leftClip = false,
+                            rightClip = false;
 
                           if (rawEnd <= vStart) {
                             barLeft = 0;
@@ -1755,112 +2231,193 @@ const App = () => {
                           }
 
                           return (
-                            <div 
-                              className={`absolute h-[22px] bg-indigo-100 border border-indigo-200 shadow-sm flex items-center px-1.5 z-10 select-none group/bar top-[3px] ${leftClip || rightClip ? 'cursor-default' : 'cursor-grab hover:bg-indigo-200 hover:border-indigo-300'} transition-colors active:cursor-grabbing ${barWidth <= 2 ? 'rounded-sm' : 'rounded-lg'}`}
+                            <div
+                              className={`group/bar absolute top-[3px] z-10 flex h-[22px] items-center border border-indigo-200 bg-indigo-100 px-1.5 shadow-sm select-none ${leftClip || rightClip ? "cursor-default" : "cursor-grab hover:border-indigo-300 hover:bg-indigo-200"} transition-colors active:cursor-grabbing ${barWidth <= 2 ? "rounded-sm" : "rounded-lg"}`}
                               style={{
                                 left: `${barLeft * DAY_WIDTH}px`,
-                                width: `${barWidth * DAY_WIDTH}px`
+                                width: `${barWidth * DAY_WIDTH}px`,
                               }}
                               onMouseDown={(e) => {
                                 if (!leftClip && !rightClip) {
-                                  handleBarMouseDown(e, activity, 'plan', 'move', activity.planStart, activity.planDuration);
+                                  handleBarMouseDown(
+                                    e,
+                                    activity,
+                                    "plan",
+                                    "move",
+                                    activity.planStart,
+                                    activity.planDuration,
+                                  );
                                 }
                               }}
                             >
                               {leftClip && (
-                                <div className="absolute -left-[1px] top-0 bottom-0 flex items-center text-indigo-400 text-[8px] font-bold pointer-events-none">▶</div>
+                                <div className="pointer-events-none absolute top-0 bottom-0 -left-[1px] flex items-center text-[8px] font-bold text-indigo-400">
+                                  ▶
+                                </div>
                               )}
-                              <div 
-                                className={`absolute left-0 top-0 bottom-0 w-2 hover:bg-indigo-400/30 rounded-l-lg opacity-0 group-hover/bar:opacity-100 transition-opacity ${leftClip || barWidth <= 2 ? 'hidden' : 'cursor-col-resize'}`}
-                                onMouseDown={(e) => { if (!leftClip) handleBarMouseDown(e, activity, 'plan', 'resize-start', activity.planStart, activity.planDuration); }}
+                              <div
+                                className={`absolute top-0 bottom-0 left-0 w-2 rounded-l-lg opacity-0 transition-opacity group-hover/bar:opacity-100 hover:bg-indigo-400/30 ${leftClip || barWidth <= 2 ? "hidden" : "cursor-col-resize"}`}
+                                onMouseDown={(e) => {
+                                  if (!leftClip)
+                                    handleBarMouseDown(
+                                      e,
+                                      activity,
+                                      "plan",
+                                      "resize-start",
+                                      activity.planStart,
+                                      activity.planDuration,
+                                    );
+                                }}
                               />
-                              <span className="text-[8px] text-indigo-800 font-bold truncate pointer-events-none tracking-tight w-full text-center">
-                                {getDateRangeStr(activity.planStart, activity.planDuration)}
+                              <span className="pointer-events-none w-full truncate text-center text-[8px] font-bold tracking-tight text-indigo-800">
+                                {getDateRangeStr(
+                                  activity.planStart,
+                                  activity.planDuration,
+                                )}
                               </span>
-                              <div 
-                                className={`absolute right-0 top-0 bottom-0 w-2 hover:bg-indigo-400/30 rounded-r-lg opacity-0 group-hover/bar:opacity-100 transition-opacity ${rightClip || barWidth <= 2 ? 'hidden' : 'cursor-col-resize'}`}
-                                onMouseDown={(e) => { if (!rightClip) handleBarMouseDown(e, activity, 'plan', 'resize-end', activity.planStart, activity.planDuration); }}
+                              <div
+                                className={`absolute top-0 right-0 bottom-0 w-2 rounded-r-lg opacity-0 transition-opacity group-hover/bar:opacity-100 hover:bg-indigo-400/30 ${rightClip || barWidth <= 2 ? "hidden" : "cursor-col-resize"}`}
+                                onMouseDown={(e) => {
+                                  if (!rightClip)
+                                    handleBarMouseDown(
+                                      e,
+                                      activity,
+                                      "plan",
+                                      "resize-end",
+                                      activity.planStart,
+                                      activity.planDuration,
+                                    );
+                                }}
                               />
                               {rightClip && (
-                                <div className="absolute -right-[1px] top-0 bottom-0 flex items-center text-indigo-400 text-[8px] font-bold pointer-events-none">◀</div>
+                                <div className="pointer-events-none absolute top-0 -right-[1px] bottom-0 flex items-center text-[8px] font-bold text-indigo-400">
+                                  ◀
+                                </div>
                               )}
                             </div>
                           );
                         })()}
 
-                        {showActualBars && (
-                        (() => {
-                          const vStart = visibleRange.start;
-                          const vEnd = visibleRange.end;
-                          const rawStart = activity.actualStart;
-                          const rawDuration = activity.actualDuration;
-                          const rawEnd = rawStart + rawDuration;
+                        {showActualBars &&
+                          (() => {
+                            const vStart = visibleRange.start;
+                            const vEnd = visibleRange.end;
+                            const rawStart = activity.actualStart;
+                            const rawDuration = activity.actualDuration;
+                            const rawEnd = rawStart + rawDuration;
 
-                          let barLeft: number, barWidth: number;
-                          let leftClip = false, rightClip = false;
+                            let barLeft: number, barWidth: number;
+                            let leftClip = false,
+                              rightClip = false;
 
-                          if (rawEnd <= vStart) {
-                            barLeft = 0;
-                            barWidth = 1;
-                            rightClip = true;
-                          } else if (rawStart >= vEnd) {
-                            barLeft = periodCount - 1;
-                            barWidth = 1;
-                            leftClip = true;
-                          } else {
-                            const clampedStart = Math.max(rawStart, vStart);
-                            const clampedEnd = Math.min(rawEnd, vEnd);
-                            barLeft = clampedStart - vStart;
-                            barWidth = Math.max(1, clampedEnd - clampedStart);
-                            leftClip = rawStart < vStart;
-                            rightClip = rawEnd > vEnd;
-                          }
+                            if (rawEnd <= vStart) {
+                              barLeft = 0;
+                              barWidth = 1;
+                              rightClip = true;
+                            } else if (rawStart >= vEnd) {
+                              barLeft = periodCount - 1;
+                              barWidth = 1;
+                              leftClip = true;
+                            } else {
+                              const clampedStart = Math.max(rawStart, vStart);
+                              const clampedEnd = Math.min(rawEnd, vEnd);
+                              barLeft = clampedStart - vStart;
+                              barWidth = Math.max(1, clampedEnd - clampedStart);
+                              leftClip = rawStart < vStart;
+                              rightClip = rawEnd > vEnd;
+                            }
 
-                          return (
-                        <div 
-                          className={`absolute bottom-[3px] h-[22px] rounded-lg cursor-grab shadow-md flex overflow-hidden z-10 select-none active:cursor-grabbing hover:shadow-lg transition-all group/actual ${
-                            activity.isActualPlaceholder ? 'bg-slate-400 border border-slate-500' : ''
-                          } ${leftClip || rightClip ? 'rounded-sm' : 'rounded-lg'}`}
-                          style={{
-                            left: `${barLeft * DAY_WIDTH}px`,
-                            width: `${barWidth * DAY_WIDTH}px`
-                          }}
-                          onMouseDown={(e) => { if (!leftClip && !rightClip) handleBarMouseDown(e, activity, 'actual', 'move', activity.actualStart, activity.actualDuration); }}
-                        >
-                          {/* Inner structure for colors (Green vs Red) */}
-                          <div className="flex w-full h-full pointer-events-none">
-                            {!activity.isActualPlaceholder && normalPeriods > 0 && (
-                              <div style={{ flex: normalPeriods }} className="bg-emerald-500 border-r border-emerald-600/20" />
-                            )}
-                            {!activity.isActualPlaceholder && overagePeriods > 0 && (
-                              <div style={{ flex: overagePeriods }} className="bg-rose-500 border-l border-rose-600/20" />
-                            )}
-                          </div>
+                            return (
+                              <div
+                                className={`group/actual absolute bottom-[3px] z-10 flex h-[22px] cursor-grab overflow-hidden rounded-lg shadow-md transition-all select-none hover:shadow-lg active:cursor-grabbing ${
+                                  activity.isActualPlaceholder
+                                    ? "border border-slate-500 bg-slate-400"
+                                    : ""
+                                } ${leftClip || rightClip ? "rounded-sm" : "rounded-lg"}`}
+                                style={{
+                                  left: `${barLeft * DAY_WIDTH}px`,
+                                  width: `${barWidth * DAY_WIDTH}px`,
+                                }}
+                                onMouseDown={(e) => {
+                                  if (!leftClip && !rightClip)
+                                    handleBarMouseDown(
+                                      e,
+                                      activity,
+                                      "actual",
+                                      "move",
+                                      activity.actualStart,
+                                      activity.actualDuration,
+                                    );
+                                }}
+                              >
+                                {/* Inner structure for colors (Green vs Red) */}
+                                <div className="pointer-events-none flex h-full w-full">
+                                  {!activity.isActualPlaceholder &&
+                                    normalPeriods > 0 && (
+                                      <div
+                                        style={{ flex: normalPeriods }}
+                                        className="border-r border-emerald-600/20 bg-emerald-500"
+                                      />
+                                    )}
+                                  {!activity.isActualPlaceholder &&
+                                    overagePeriods > 0 && (
+                                      <div
+                                        style={{ flex: overagePeriods }}
+                                        className="border-l border-rose-600/20 bg-rose-500"
+                                      />
+                                    )}
+                                </div>
 
-                          {/* Overlay for text and handles */}
-                          <div className="absolute inset-0 flex items-center justify-center px-2">
-                            {leftClip && (
-                              <div className="absolute -left-[1px] top-0 bottom-0 flex items-center text-white text-[8px] font-bold pointer-events-none drop-shadow-sm">▶</div>
-                            )}
-                            <div 
-                              className={`absolute left-0 top-0 bottom-0 w-2 hover:bg-black/10 pointer-events-auto transition-opacity ${leftClip || barWidth <= 2 ? 'hidden' : 'opacity-0 group-hover/actual:opacity-100 cursor-col-resize'}`}
-                              onMouseDown={(e) => { if (!leftClip) handleBarMouseDown(e, activity, 'actual', 'resize-start', activity.actualStart, activity.actualDuration); }}
-                            />
-                            <span className="text-[8px] text-white font-black drop-shadow-sm truncate pointer-events-none tracking-tight">
-                              {getDateRangeStr(activity.actualStart, activity.actualDuration)}
-                            </span>
-                            <div 
-                              className={`absolute right-0 top-0 bottom-0 w-2 hover:bg-black/10 pointer-events-auto transition-opacity ${rightClip || barWidth <= 2 ? 'hidden' : 'opacity-0 group-hover/actual:opacity-100 cursor-col-resize'}`}
-                              onMouseDown={(e) => { if (!rightClip) handleBarMouseDown(e, activity, 'actual', 'resize-end', activity.actualStart, activity.actualDuration); }}
-                            />
-                            {rightClip && (
-                              <div className="absolute -right-[1px] top-0 bottom-0 flex items-center text-white text-[8px] font-bold pointer-events-none drop-shadow-sm">◀</div>
-                            )}
-                          </div>
-                        </div>
-                          );
-                        })()
-                        )}
+                                {/* Overlay for text and handles */}
+                                <div className="absolute inset-0 flex items-center justify-center px-2">
+                                  {leftClip && (
+                                    <div className="pointer-events-none absolute top-0 bottom-0 -left-[1px] flex items-center text-[8px] font-bold text-white drop-shadow-sm">
+                                      ▶
+                                    </div>
+                                  )}
+                                  <div
+                                    className={`pointer-events-auto absolute top-0 bottom-0 left-0 w-2 transition-opacity hover:bg-black/10 ${leftClip || barWidth <= 2 ? "hidden" : "cursor-col-resize opacity-0 group-hover/actual:opacity-100"}`}
+                                    onMouseDown={(e) => {
+                                      if (!leftClip)
+                                        handleBarMouseDown(
+                                          e,
+                                          activity,
+                                          "actual",
+                                          "resize-start",
+                                          activity.actualStart,
+                                          activity.actualDuration,
+                                        );
+                                    }}
+                                  />
+                                  <span className="pointer-events-none truncate text-[8px] font-black tracking-tight text-white drop-shadow-sm">
+                                    {getDateRangeStr(
+                                      activity.actualStart,
+                                      activity.actualDuration,
+                                    )}
+                                  </span>
+                                  <div
+                                    className={`pointer-events-auto absolute top-0 right-0 bottom-0 w-2 transition-opacity hover:bg-black/10 ${rightClip || barWidth <= 2 ? "hidden" : "cursor-col-resize opacity-0 group-hover/actual:opacity-100"}`}
+                                    onMouseDown={(e) => {
+                                      if (!rightClip)
+                                        handleBarMouseDown(
+                                          e,
+                                          activity,
+                                          "actual",
+                                          "resize-end",
+                                          activity.actualStart,
+                                          activity.actualDuration,
+                                        );
+                                    }}
+                                  />
+                                  {rightClip && (
+                                    <div className="pointer-events-none absolute top-0 -right-[1px] bottom-0 flex items-center text-[8px] font-bold text-white drop-shadow-sm">
+                                      ◀
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
                       </td>
                     </tr>
                   </React.Fragment>
@@ -1871,18 +2428,30 @@ const App = () => {
         </div>
 
         {/* Footer Info */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col md:flex-row justify-between items-center gap-3 text-[10px] font-bold text-slate-500">
+        <div className="flex flex-col items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 p-4 text-[10px] font-bold text-slate-500 md:flex-row">
           <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1.5 px-2 py-1 bg-white rounded-lg border border-slate-200 shadow-sm"><Info size={12} className="text-indigo-500"/> Arraste o centro das barras para mover</span>
-            <span className="flex items-center gap-1.5 px-2 py-1 bg-white rounded-lg border border-slate-200 shadow-sm"><Target size={12} className="text-emerald-500"/> Arraste as bordas para redimensionar</span>
+            <span className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 shadow-sm">
+              <Info size={12} className="text-indigo-500" /> Arraste o centro
+              das barras para mover
+            </span>
+            <span className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 shadow-sm">
+              <Target size={12} className="text-emerald-500" /> Arraste as
+              bordas para redimensionar
+            </span>
           </div>
-          <div className="flex items-center gap-2 text-slate-300 tracking-widest uppercase">
+          <div className="flex items-center gap-2 tracking-widest text-slate-300 uppercase">
             <span>Portfolio Strategy</span>
-            <span className="w-1 h-1 rounded-full bg-slate-200" />
+            <span className="h-1 w-1 rounded-full bg-slate-200" />
             <span>v4.0 Enterprise</span>
           </div>
         </div>
       </div>
+
+      <SprintResumoModal
+        isOpen={isResumoOpen}
+        activities={activities}
+        onClose={() => setIsResumoOpen(false)}
+      />
     </div>
   );
 };
